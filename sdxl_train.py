@@ -21,7 +21,7 @@ import torch_xla.utils.serialization as xser
 
 from accelerate.utils import set_seed
 from diffusers import DDPMScheduler
-from library import deepspeed_utils, sdxl_model_util, strategy_base, strategy_sd, strategy_sdxl
+from library import deepspeed_utils, sdxl_model_util
 
 import library.train_util as train_util
 
