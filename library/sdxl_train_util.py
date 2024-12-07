@@ -214,19 +214,8 @@ def get_size_embeddings(orig_size, crop_size, target_size, device):
 
 
 def save_sd_model_on_train_end(
-    args: argparse.Namespace,
-    src_path: str,
-    save_stable_diffusion_format: bool,
-    use_safetensors: bool,
-    save_dtype: torch.dtype,
-    epoch: int,
-    global_step: int,
-    text_encoder1,
-    text_encoder2,
-    unet,
-    vae,
-    logit_scale,
-    ckpt_info,
+    args: argparse.Namespace,  # Add args
+    *other_args,              # Use *other_args to simplify argument passing
 ):
     def sd_saver(ckpt_file, epoch_no, global_step):
         sai_metadata = train_util.get_sai_model_spec(None, args, True, False, False, is_stable_diffusion_ckpt=True)
@@ -255,10 +244,31 @@ def save_sd_model_on_train_end(
             use_safetensors=use_safetensors,
             save_dtype=save_dtype,
         )
+    
+    # TPU-specific saver
+    def xla_saver(ckpt_file, epoch_no, global_step): # Update arguments
+        import torch_xla.utils.serialization as xser
+        state_dict = { # Create the state_dict directly here
+            'model.diffusion_model.': args.unet.state_dict(), # Add args prefix for models
+            'conditioner.embedders.0.transformer.': args.text_encoder1.state_dict(),
+            'conditioner.embedders.1.model.': sdxl_model_util.convert_text_encoder_2_state_dict_to_sdxl(args.text_encoder2.state_dict(), args.logit_scale),
+            'first_stage_model.': model_util.convert_vae_state_dict(args.vae.state_dict()), 
+        }
+        if getattr(args, 'use_tpu', False):  # Check if using TPU
+            xser.save(state_dict, ckpt_file, master_only=True) # Use xser.save
+        else: # Save as regular checkpoint if not using TPU
+            torch.save(state_dict, ckpt_file)
 
-    train_util.save_sd_model_on_train_end_common(
-        args, save_stable_diffusion_format, use_safetensors, epoch, global_step, sd_saver, diffusers_saver
-    )
+
+
+    if getattr(args, 'use_tpu', False):
+        train_util.save_sd_model_on_train_end_common(
+            args, *other_args, xla_saver, xla_saver
+        )
+    else:
+        train_util.save_sd_model_on_train_end_common(
+            args, *other_args, sd_saver, diffusers_saver
+        )
 
 
 # epochとstepの保存、メタデータにepoch/stepが含まれ引数が同じになるため、統合している
@@ -309,18 +319,60 @@ def save_sd_model_on_epoch_end_or_stepwise(
             save_dtype=save_dtype,
         )
 
-    train_util.save_sd_model_on_epoch_end_or_stepwise_common(
-        args,
-        on_epoch_end,
-        accelerator,
-        save_stable_diffusion_format,
-        use_safetensors,
-        epoch,
-        num_train_epochs,
-        global_step,
-        sd_saver,
-        diffusers_saver,
-    )
+    # TPU-specific saver
+    def xla_saver(save_path):
+        import torch_xla.utils.serialization as xser
+        # Aggregate all model components' state_dicts into a single dictionary
+        model_state = {
+            'ckpt_file': ckpt_file.state_dict(),
+            'text_encoder1': text_encoder1.state_dict(),
+            'text_encoder2': text_encoder2.state_dict(),
+            'unet': unet.state_dict(),
+            'epoch_no': epoch_no.state_dict(),
+            'global_step': global_step.state_dict(),
+            'ckpt_info': ckpt_info.state_dict(),
+            'vae': vae.state_dict(),
+            'logit_scale': logit_scale.state_dict(),
+            'sai_metadata': sai_metadata.state_dict(),
+            'save_dtype': save_dtype.state_dict(),
+        }
+        
+        # Save the aggregated state_dict using XLA serialization
+        xser.save(model_state, save_path, master_only=True)
+    
+
+    if getattr(args, 'use_tpu', False):
+        def tpu_saver(ckpt_file, epoch_no, global_step):
+            xla_saver(ckpt_file)
+        
+        # Pass the TPU-specific saver for both SD and Diffusers formats if applicable
+        train_util.save_sd_model_on_epoch_end_or_stepwise_common(
+            args,
+            on_epoch_end,
+            accelerator,
+            save_stable_diffusion_format,
+            use_safetensors,
+            epoch,
+            num_train_epochs,
+            global_step,
+            tpu_saver,        # SD Saver replaced with TPU saver
+            tpu_saver         # Diffusers Saver replaced with TPU saver
+        )
+    else:
+        # Original saving method for non-TPU setups
+        train_util.save_sd_model_on_epoch_end_or_stepwise_common(
+            args,
+            on_epoch_end,
+            accelerator,
+            save_stable_diffusion_format,
+            use_safetensors,
+            epoch,
+            num_train_epochs,
+            global_step,
+            sd_saver,         # SD Saver
+            diffusers_saver    # Diffusers Saver
+        )
+        
 
 
 def add_sdxl_training_arguments(parser: argparse.ArgumentParser):

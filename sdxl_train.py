@@ -10,14 +10,18 @@ import toml
 from tqdm import tqdm
 
 import torch
+import torch.nn as nn  # Added this line
 from library.device_utils import init_ipex, clean_memory_on_device
 
-
-init_ipex()
+# TPU-specific imports
+import torch_xla.core.xla_model as xm
+import torch_xla.distributed.parallel_loader as pl
+import torch_xla.distributed.xla_multiprocessing as xmp
+import torch_xla.utils.serialization as xser
 
 from accelerate.utils import set_seed
 from diffusers import DDPMScheduler
-from library import deepspeed_utils, sdxl_model_util
+from library import deepspeed_utils, sdxl_model_util, strategy_base, strategy_sd, strategy_sdxl
 
 import library.train_util as train_util
 
@@ -122,11 +126,11 @@ def train(args):
     use_dreambooth_method = args.in_json is None
 
     if args.seed is not None:
-        set_seed(args.seed)  # 乱数系列を初期化する
+        set_seed(args.seed)  # Initialize the random number series
 
     tokenizer1, tokenizer2 = sdxl_train_util.load_tokenizers(args)
 
-    # データセットを準備する
+    # Prepare the dataset
     if args.dataset_class is None:
         blueprint_generator = BlueprintGenerator(ConfigSanitizer(True, True, args.masked_loss, True))
         if args.dataset_config is not None:
@@ -166,6 +170,7 @@ def train(args):
                     ]
                 }
 
+        
         blueprint = blueprint_generator.generate(user_config, args, tokenizer=[tokenizer1, tokenizer2])
         train_dataset_group = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
     else:
@@ -197,15 +202,23 @@ def train(args):
             train_dataset_group.is_text_encoder_output_cacheable()
         ), "when caching text encoder output, either caption_dropout_rate, shuffle_caption, token_warmup_step or caption_tag_dropout_rate cannot be used / text encoderの出力をキャッシュするときはcaption_dropout_rate, shuffle_caption, token_warmup_step, caption_tag_dropout_rateは使えません"
 
-    # acceleratorを準備する
+    # Prepare Accelerator
     logger.info("prepare accelerator")
-    accelerator = train_util.prepare_accelerator(args)
 
-    # mixed precisionに対応した型を用意しておき適宜castする
+    if getattr(args, 'use_tpu', False):
+        # TPU-specific initialization
+        import torch_xla.core.xla_model as xm
+        device = xm.xla_device()
+        accelerator = train_util.prepare_accelerator(args, device=device)
+    else:
+        # Original GPU/CPU setup
+        accelerator = train_util.prepare_accelerator(args)
+
+    #Prepare a type that supports mixed Precision and Cast as appropriate
     weight_dtype, save_dtype = train_util.prepare_dtype(args)
     vae_dtype = torch.float32 if args.no_half_vae else weight_dtype
 
-    # モデルを読み込む
+    # Read the model
     (
         load_stable_diffusion_format,
         text_encoder1,
@@ -233,7 +246,7 @@ def train(args):
         use_safetensors = args.use_safetensors or ("safetensors" in args.save_model_as.lower())
         # assert save_stable_diffusion_format, "save_model_as must be ckpt or safetensors / save_model_asはckptかsafetensorsである必要があります"
 
-    # Diffusers版のxformers使用フラグを設定する関数
+    # Diffusers version of the XFORMERS used function to configure a flag
     def set_diffusers_xformers_flag(model, valid):
         def fn_recursive_set_mem_eff(module: torch.nn.Module):
             if hasattr(module, "set_use_memory_efficient_attention_xformers"):
@@ -244,7 +257,7 @@ def train(args):
 
         fn_recursive_set_mem_eff(model)
 
-    # モデルに xformers とか memory efficient attention を組み込む
+    # Incorporate XFORMERS or Memory Effication Attension into the model
     if args.diffusers_xformers:
         # もうU-Netを独自にしたので動かないけどVAEのxformersは動くはず
         accelerator.print("Use xformers by Diffusers")
@@ -257,7 +270,7 @@ def train(args):
         if torch.__version__ >= "2.0.0":  # PyTorch 2.0.0 以上対応のxformersなら以下が使える
             vae.set_use_memory_efficient_attention_xformers(args.xformers)
 
-    # 学習を準備する
+    # Prepare learning
     if cache_latents:
         vae.to(accelerator.device, dtype=vae_dtype)
         vae.requires_grad_(False)
@@ -269,7 +282,7 @@ def train(args):
 
         accelerator.wait_for_everyone()
 
-    # 学習を準備する：モデルを適切な状態にする
+    # Prepare learning: Make the model appropriate
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
     train_unet = args.learning_rate > 0
@@ -304,7 +317,7 @@ def train(args):
         text_encoder1.eval()
         text_encoder2.eval()
 
-        # TextEncoderの出力をキャッシュする
+        # Cache the output of TextEncoder
         if args.cache_text_encoder_outputs:
             # Text Encodes are eval and no grad
             with torch.no_grad(), accelerator.autocast():
@@ -353,23 +366,71 @@ def train(args):
     accelerator.print(f"number of models: {len(training_models)}")
     accelerator.print(f"number of trainable parameters: {n_params}")
 
-    # 学習に必要なクラスを準備する
+    # Prepare the classes required for learning
     accelerator.print("prepare optimizer, data loader etc.")
     _, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
 
-    # dataloaderを準備する
-    # DataLoaderのプロセス数：0 は persistent_workers が使えないので注意
+    # Prepare Dataloader
+    # Number of DataLoader processes: Note that 0 means persistent_workers cannot be used.
     n_workers = min(args.max_data_loader_n_workers, os.cpu_count())  # cpu_count or max_data_loader_n_workers
-    train_dataloader = torch.utils.data.DataLoader(
-        train_dataset_group,
-        batch_size=1,
-        shuffle=True,
-        collate_fn=collator,
-        num_workers=n_workers,
-        persistent_workers=args.persistent_data_loader_workers,
-    )
+    def prepare_tpu_dataloader(train_dataset_group, args):
+        """
+        Prepare a distributed dataloader for TPU training.
+        
+        Args:
+            train_dataset_group: Original dataset group.
+            args: Configuration arguments.
+        
+        Returns:
+            Distributed TPU-compatible DataLoader.
+        """
+        import torch
+        import torch_xla.core.xla_model as xm
+        import torch_xla.distributed.parallel_loader as pl
+        
+        # Determine batch size for TPU
+        # TPUs work best with larger batch sizes, typically 128 per core
+        batch_size = args.train_batch_size  # Already set to per-core batch size
+        
+        # Create distributed sampler
+        train_sampler = torch.utils.data.distributed.DistributedSampler(
+            train_dataset_group,
+            num_replicas=xm.xrt_world_size(),  # Total number of TPU cores
+            rank=xm.get_ordinal(),              # Current core's rank
+            shuffle=True
+        )
+        
+        # Create DataLoader with distributed sampler
+        train_dataloader = torch.utils.data.DataLoader(
+            train_dataset_group,
+            batch_size=batch_size,
+            sampler=train_sampler,
+            num_workers=args.max_data_loader_n_workers,
+            pin_memory=True,
+            drop_last=True  # Ensures consistent batch sizes across cores
+        )
+        
+        return train_dataloader
 
-    # 学習ステップ数を計算する
+    if getattr(args, 'use_tpu', False):
+        train_dataloader = prepare_tpu_dataloader(train_dataset_group, args)
+    else:
+        train_dataloader = torch.utils.data.DataLoader(
+            train_dataset_group,
+            batch_size=1,
+            shuffle=True,
+            collate_fn=collator,
+            num_workers=n_workers,
+        )
+            
+
+    if getattr(args, 'use_tpu', False):
+        # Wrap the DataLoader with ParallelLoader
+        para_loader = pl.ParallelLoader(train_dataloader, [xm.xla_device()])
+        train_dataloader = para_loader.per_device_loader(xm.xla_device())
+    
+
+    # Calculate the number of training steps
     if args.max_train_epochs is not None:
         args.max_train_steps = args.max_train_epochs * math.ceil(
             len(train_dataloader) / accelerator.num_processes / args.gradient_accumulation_steps
@@ -378,13 +439,13 @@ def train(args):
             f"override steps. steps for {args.max_train_epochs} epochs is / 指定エポックまでのステップ数: {args.max_train_steps}"
         )
 
-    # データセット側にも学習ステップを送信
+    # Send training steps to the dataset side as well
     train_dataset_group.set_max_train_steps(args.max_train_steps)
 
-    # lr schedulerを用意する
+    # Prepare LR Scheduler
     lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
 
-    # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
+    # Experimental functions: FP16/BF16, including gradient, set the entire model to learn to FP16/BF16
     if args.full_fp16:
         assert (
             args.mixed_precision == "fp16"
@@ -430,7 +491,7 @@ def train(args):
             text_encoder2 = accelerator.prepare(text_encoder2)
         optimizer, train_dataloader, lr_scheduler = accelerator.prepare(optimizer, train_dataloader, lr_scheduler)
 
-    # TextEncoderの出力をキャッシュするときにはCPUへ移動する
+    # Move to the CPU when caching TextEncoder output
     if args.cache_text_encoder_outputs:
         # move Text Encoders for sampling images. Text Encoder doesn't work on CPU with fp16
         text_encoder1.to("cpu", dtype=torch.float32)
@@ -441,7 +502,7 @@ def train(args):
         text_encoder1.to(accelerator.device)
         text_encoder2.to(accelerator.device)
 
-    # 実験的機能：勾配も含めたfp16学習を行う　PyTorchにパッチを当ててfp16でのgrad scaleを有効にする
+    # Experimental function: FP16 learning including gradient Enables Grad Scale in FP16 by patching Pytorch
     if args.full_fp16:
         # During deepseed training, accelerate not handles fp16/bf16|mixed precision directly via scaler. Let deepspeed engine do.
         # -> But we think it's ok to patch accelerator even if deepspeed is enabled.
@@ -450,13 +511,13 @@ def train(args):
     # resumeする
     train_util.resume_from_local_or_hf_if_specified(accelerator, args)
 
-    # epoch数を計算する
+    # Calculate the number of Epoch
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
     if (args.save_n_epoch_ratio is not None) and (args.save_n_epoch_ratio > 0):
         args.save_every_n_epochs = math.floor(num_train_epochs / args.save_n_epoch_ratio) or 1
 
-    # 学習する
+    # Training
     # total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
     accelerator.print("running training / 学習開始")
     accelerator.print(f"  num examples / サンプル数: {train_dataset_group.num_train_images}")
@@ -504,6 +565,14 @@ def train(args):
 
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
+
+            if getattr(args, 'use_tpu', False):
+                # Ensure all tensors are on the TPU device
+                for key in batch:
+                    if isinstance(batch[key], torch.Tensor):
+                        batch[key] = batch[key].to(xm.xla_device())
+
+
             with accelerator.accumulate(*training_models):
                 if "latents" in batch and batch["latents"] is not None:
                     latents = batch["latents"].to(accelerator.device).to(dtype=weight_dtype)
@@ -618,22 +687,55 @@ def train(args):
                 else:
                     loss = train_util.conditional_loss(noise_pred.float(), target.float(), reduction="mean", loss_type=args.loss_type, huber_c=huber_c)
 
+                #Backward pass
                 accelerator.backward(loss)
-                if accelerator.sync_gradients and args.max_grad_norm != 0.0:
-                    params_to_clip = []
-                    for m in training_models:
-                        params_to_clip.extend(m.parameters())
-                    accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
+
+                if getattr(args, 'use_tpu', False):
+                    if accelerator.sync_gradients and args.max_grad_norm != 0.0:
+                        # Clip gradients if necessary
+                        params_to_clip = []
+                        for m in training_models:
+                            params_to_clip.extend(m.parameters())
+                        
+                        xm.all_reduce("sum", [p.grad for p in params_to_clip if p.grad is not None])
+                        #Perform gradient clipping using Pytorch
+                        nn.utils.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+                        #accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+                
+                    #Optimizer step
+                    optimizer.step()
+                    if getattr(args, 'use_tpu', False):
+                        xm.optimizer_step(optimizer, barrier=True) # Use xm.optimizer_step
+                        lr_scheduler.step()
+                        optimizer.zero_grad(set_to_none=True)
+                        xm.mark_step() # Increment step counter
+                else:
+                    # Original GPU/CPU logic
+                    if not (args.fused_backward_pass or args.fused_optimizer_groups):
+                        if accelerator.sync_gradients and args.max_grad_norm != 0.0:
+                            params_to_clip = []
+                            for m in training_models:
+                                params_to_clip.extend(m.parameters())
+                            accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+
+                        optimizer.step()
+                        lr_scheduler.step()
+                        optimizer.zero_grad(set_to_none=True)
+
+            # TPU-specific logging and synchronization
+            if getattr(args, 'use_tpu', False):
+                # Example: Log loss on the master core
+                if xm.is_master_ordinal():
+                    current_loss = loss.detach().item()
+                    print(f"Epoch {epoch+1}, Step {step+1}, Loss: {current_loss}")
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
                 progress_bar.update(1)
                 global_step += 1
 
+                #Sample images
                 sdxl_train_util.sample_images(
                     accelerator,
                     args,
@@ -646,7 +748,7 @@ def train(args):
                     unet,
                 )
 
-                # 指定ステップごとにモデルを保存
+                # Save the model at each specified step
                 if args.save_every_n_steps is not None and global_step % args.save_every_n_steps == 0:
                     accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
@@ -669,8 +771,8 @@ def train(args):
                             logit_scale,
                             ckpt_info,
                         )
-
-            current_loss = loss.detach().item()  # 平均なのでbatch sizeは関係ないはず
+            #Log metrics
+            current_loss = loss.detach().item()  # Since it is an average, batch size should be irrelevant.
             if args.logging_dir is not None:
                 logs = {"loss": current_loss}
                 if block_lrs is None:
@@ -739,25 +841,26 @@ def train(args):
     if args.save_state or args.save_state_on_train_end:        
         train_util.save_state_on_train_end(args, accelerator)
 
-    del accelerator  # この後メモリを使うのでこれは消す
+    del accelerator  # I'm going to use memory after this, so I'm going to turn this off.
 
     if is_main_process:
         src_path = src_stable_diffusion_ckpt if save_stable_diffusion_format else src_diffusers_model_path
-        sdxl_train_util.save_sd_model_on_train_end(
-            args,
-            src_path,
-            save_stable_diffusion_format,
-            use_safetensors,
-            save_dtype,
-            epoch,
-            global_step,
-            text_encoder1,
-            text_encoder2,
-            unet,
-            vae,
-            logit_scale,
-            ckpt_info,
-        )
+        if getattr(args, 'use_tpu', False):
+            sdxl_train_util.save_sd_model_on_train_end(  # Correctly use this function
+                args,
+                src_path,
+                save_stable_diffusion_format,
+                use_safetensors,
+                save_dtype,
+                epoch,
+                global_step,
+                text_encoder1,  # Pass unwrapped models
+                text_encoder2,  # Pass unwrapped models
+                unet,         # Pass unwrapped models
+                vae,
+                logit_scale,
+                ckpt_info,
+            )
         logger.info("model saved.")
 
 
