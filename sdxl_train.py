@@ -135,77 +135,6 @@ def train(args):
         )
         strategy_base.LatentsCachingStrategy.set_strategy(latents_caching_strategy)
 
-    # データセットを準備する
-    if args.dataset_class is None:
-        blueprint_generator = BlueprintGenerator(ConfigSanitizer(True, True, args.masked_loss, True))
-        if args.dataset_config is not None:
-            logger.info(f"Load dataset config from {args.dataset_config}")
-            user_config = config_util.load_user_config(args.dataset_config)
-            ignored = ["train_data_dir", "in_json"]
-            if any(getattr(args, attr) is not None for attr in ignored):
-                logger.warning(
-                    "ignore following options because config file is found: {0} / 設定ファイルが利用されるため以下のオプションは無視されます: {0}".format(
-                        ", ".join(ignored)
-                    )
-                )
-        else:
-            if use_dreambooth_method:
-                logger.info("Using DreamBooth method.")
-                user_config = {
-                    "datasets": [
-                        {
-                            "subsets": config_util.generate_dreambooth_subsets_config_by_subdirs(
-                                args.train_data_dir, args.reg_data_dir
-                            )
-                        }
-                    ]
-                }
-            else:
-                logger.info("Training with captions.")
-                user_config = {
-                    "datasets": [
-                        {
-                            "subsets": [
-                                {
-                                    "image_dir": args.train_data_dir,
-                                    "metadata_file": args.in_json,
-                                }
-                            ]
-                        }
-                    ]
-                }
-
-        blueprint = blueprint_generator.generate(user_config, args)
-        train_dataset_group = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
-    else:
-        train_dataset_group = train_util.load_arbitrary_dataset(args)
-
-    current_epoch = Value("i", 0)
-    current_step = Value("i", 0)
-    ds_for_collator = train_dataset_group if args.max_data_loader_n_workers == 0 else None
-    collator = train_util.collator_class(current_epoch, current_step, ds_for_collator)
-
-    train_dataset_group.verify_bucket_reso_steps(32)
-
-    if args.debug_dataset:
-        train_util.debug_dataset(train_dataset_group, True)
-        return
-    if len(train_dataset_group) == 0:
-        logger.error(
-            "No data found. Please verify the metadata file and train_data_dir option. / 画像がありません。メタデータおよびtrain_data_dirオプションを確認してください。"
-        )
-        return
-
-    if cache_latents:
-        assert (
-            train_dataset_group.is_latent_cacheable()
-        ), "when caching latents, either color_aug or random_crop cannot be used / latentをキャッシュするときはcolor_augとrandom_cropは使えません"
-
-    if args.cache_text_encoder_outputs:
-        assert (
-            train_dataset_group.is_text_encoder_output_cacheable()
-        ), "when caching text encoder output, either caption_dropout_rate, shuffle_caption, token_warmup_step or caption_tag_dropout_rate cannot be used / text encoderの出力をキャッシュするときはcaption_dropout_rate, shuffle_caption, token_warmup_step, caption_tag_dropout_rateは使えません"
-
     # acceleratorを準備する
     logger.info("prepare accelerator")
     accelerator = train_util.prepare_accelerator(args)
@@ -285,6 +214,54 @@ def train(args):
     train_unet = args.learning_rate != 0
     train_text_encoder1 = False
     train_text_encoder2 = False
+
+    #<--START CUSTOM TFRECORD and DATALOADER CODE-->
+
+    def _parse_function(example_proto):
+        features = {
+            'image_raw': tf.io.FixedLenFeature([], tf.string),
+            'caption': tf.io.FixedLenFeature([], tf.string),
+        }
+        parsed_features = tf.io.parse_single_example(example_proto, features)
+        image = tf.image.decode_png(parsed_features['image_raw'], channels=3)
+        caption = parsed_features['caption'].numpy().decode() # Decode back to string
+        return image, caption
+    
+    # Prepare TFRecord dataset (Updated)
+    per_worker_batch_size = args.train_batch_size // accelerator.num_processes
+    tfrecord_filenames = tf.io.gfile.glob(os.path.join(args.train_data_dir, "*.tfrec"))
+    dataset = tf.data.TFRecordDataset(tfrecord_filenames, num_parallel_reads=tf.data.AUTOTUNE)
+    dataset = dataset.map(_parse_function, num_parallel_calls=tf.data.AUTOTUNE).shuffle(buffer_size=1000).batch(per_worker_batch_size, drop_remainder=True) # drop_remainder for TPU
+
+    num_train_images = sum(1 for _ in dataset) # No easy way to get length for batches so iterate
+
+    # NO CACHING SUPPORT FOR TFRECORDS IN THIS SIMPLIFIED VERSION
+    if cache_latents:
+        accelerator.print("Warning: Latent caching is not supported with TFRecords in this implementation. Disabling.")
+        cache_latents = False  # Disable latent caching
+    if args.cache_text_encoder_outputs:
+        accelerator.print("Warning: Text encoder output caching is not supported with TFRecords in this implementation. Disabling.")
+        args.cache_text_encoder_outputs = False
+
+    # Prepare for conversion to PyTorch DataLoader
+    options = tf.data.Options()
+    options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF  # Important for TPUs
+    dataset = dataset.with_options(options)
+
+    # Now make the PyTorch DataLoader
+    train_dataloader = torch.utils.data.DataLoader(
+        list(dataset.as_numpy_iterator()), # Convert to list of NumPy arrays for DataLoader compatibility
+        batch_size=None, # Batching is already handled by tf.data
+        shuffle=False, # Shuffling done by tf.data
+        collate_fn=collator # your existing collate_fn
+    )
+    
+    if args.gradient_accumulation_steps > 1 and accelerator.sync_gradients:
+        args.gradient_accumulation_steps = 1 # do not use gradient accumulation during deepspeed and other distributed training
+        accelerator.print(f"gradient_accumulation_steps is reset to 1 during deepspeed training")
+    
+
+    #<--END CUSTOM TFRECORD and DATALOADER CODE-->
 
     text_encoding_strategy = strategy_sdxl.SdxlTextEncodingStrategy()
     strategy_base.TextEncodingStrategy.set_strategy(text_encoding_strategy)
@@ -416,34 +393,6 @@ def train(args):
 
     else:
         _, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
-
-    # prepare dataloader
-    # strategies are set here because they cannot be referenced in another process. Copy them with the dataset
-    # some strategies can be None
-    train_dataset_group.set_current_strategies()
-
-    # DataLoaderのプロセス数：0 は persistent_workers が使えないので注意
-    n_workers = min(args.max_data_loader_n_workers, os.cpu_count())  # cpu_count or max_data_loader_n_workers
-    train_dataloader = torch.utils.data.DataLoader(
-        train_dataset_group,
-        batch_size=1,
-        shuffle=True,
-        collate_fn=collator,
-        num_workers=n_workers,
-        persistent_workers=args.persistent_data_loader_workers,
-    )
-
-    # 学習ステップ数を計算する
-    if args.max_train_epochs is not None:
-        args.max_train_steps = args.max_train_epochs * math.ceil(
-            len(train_dataloader) / accelerator.num_processes / args.gradient_accumulation_steps
-        )
-        accelerator.print(
-            f"override steps. steps for {args.max_train_epochs} epochs is / 指定エポックまでのステップ数: {args.max_train_steps}"
-        )
-
-    # データセット側にも学習ステップを送信
-    train_dataset_group.set_max_train_steps(args.max_train_steps)
 
     # lr schedulerを用意する
     if args.fused_optimizer_groups:
@@ -579,12 +528,10 @@ def train(args):
     # 学習する
     # total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
     accelerator.print("running training / 学習開始")
-    accelerator.print(f"  num examples / サンプル数: {train_dataset_group.num_train_images}")
+    accelerator.print(f"  num examples / サンプル数: {num_train_images}")
     accelerator.print(f"  num batches per epoch / 1epochのバッチ数: {len(train_dataloader)}")
     accelerator.print(f"  num epochs / epoch数: {num_train_epochs}")
-    accelerator.print(
-        f"  batch size per device / バッチサイズ: {', '.join([str(d.batch_size) for d in train_dataset_group.datasets])}"
-    )
+    accelerator.print(f"  batch size per device / バッチサイズ: {args.train_batch_size // accelerator.num_processes}")
     # accelerator.print(
     #     f"  total train batch size (with parallel & distributed & accumulation) / 総バッチサイズ（並列学習、勾配合計含む）: {total_batch_size}"
     # )
@@ -632,6 +579,20 @@ def train(args):
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
 
+            # === Changes to Data Handling within the loop ===
+            # Since tf.data handles batching and returns numpy arrays:
+            images, captions = batch  # Unpack the tuple returned by your collate_fn
+
+            # Convert images and captions to PyTorch tensors and move to device
+            images = torch.from_numpy(images).to(accelerator.device).to(vae_dtype)
+
+            # Tokenize captions (adapt this to your tokenizer and text encoding strategy)
+            input_ids1 = tokenize_strategy.tokenizer1(captions, padding="max_length", truncation=True, max_length=tokenize_strategy.max_length, return_tensors="pt").input_ids
+            input_ids2 = tokenize_strategy.tokenizer2(captions, padding="max_length", truncation=True, max_length=tokenize_strategy.max_length, return_tensors="pt").input_ids
+            input_ids1 = input_ids1.to(accelerator.device)
+            input_ids2 = input_ids2.to(accelerator.device)
+            batch["input_ids_list"] = [input_ids1, input_ids2] # Keep this to avoid changes to rest of the training loop
+
             if args.fused_optimizer_groups:
                 optimizer_hooked_count = {i: 0 for i in range(len(optimizers))}  # reset counter for each step
 
@@ -641,7 +602,7 @@ def train(args):
                 else:
                     with torch.no_grad():
                         # latentに変換
-                        latents = vae.encode(batch["images"].to(vae_dtype)).latent_dist.sample().to(weight_dtype)
+                        latents = vae.encode(images).latent_dist.sample().to(weight_dtype)
 
                         # NaNが含まれていれば警告を表示し0に置き換える
                         if torch.any(torch.isnan(latents)):
