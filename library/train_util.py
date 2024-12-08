@@ -4305,21 +4305,12 @@ def prepare_accelerator(args: argparse.Namespace, device=None):
     deepspeed_plugin = deepspeed_utils.prepare_deepspeed_plugin(args)
 
     if args.deepspeed:
-        # DeepSpeed uses its own device assignment, so don't set here
-        accelerator = Accelerator(
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
-            mixed_precision=args.mixed_precision,
-            #cpu = args.use_cpu,
-        )
-
-    else: # Standard Training
-        accelerator = Accelerator(
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
-            mixed_precision=args.mixed_precision,
-            cpu=args.use_cpu,
-            device_placement=False if device is not None else True, #prevent accelerate from automatically placing devices
-            device=device #Setting device during init is preferred
-        )
+        accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, mixed_precision=args.mixed_precision, deepspeed_plugin=deepspeed_plugin)
+    elif args.use_tpu:
+        accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, mixed_precision=args.mixed_precision, tpu=args.use_tpu) #Use 'tpu' argument for TPU
+    else:
+        accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, mixed_precision=args.mixed_precision, cpu=args.use_cpu)
+        
     print("accelerator device:", accelerator.device)
     return accelerator
 
