@@ -4306,12 +4306,12 @@ def prepare_accelerator(args: argparse.Namespace, device=None):
 
     if args.deepspeed:
         accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, mixed_precision=args.mixed_precision, deepspeed_plugin=deepspeed_plugin)
-    elif args.use_tpu:
-        accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, mixed_precision=args.mixed_precision, tpu=args.use_tpu) #Use 'tpu' argument for TPU
-    else:
-        accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, mixed_precision=args.mixed_precision, cpu=args.use_cpu)
-        
-    print("accelerator device:", accelerator.device)
+    else: 
+        #For TPUs, the device is set within the _mp_fn using xm.xla_device().
+        accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, mixed_precision=args.mixed_precision, cpu=args.use_cpu, device_placement=False)  # device_placement=False is essential for TPU
+
+    #print("accelerator device:", accelerator.device)
+    print("RETURNING ACCELERATOR")
     return accelerator
 
 
