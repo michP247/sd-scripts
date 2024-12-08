@@ -401,6 +401,7 @@ def train(args):
         )
         
         # Create DataLoader with distributed sampler
+        print(f"Dataset length: {len(train_dataset_group)}")
         train_dataloader = torch.utils.data.DataLoader(
             train_dataset_group,
             batch_size=batch_size,
