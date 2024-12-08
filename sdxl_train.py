@@ -14,6 +14,9 @@ import torch.nn as nn  # Added this line
 from library.device_utils import init_ipex, clean_memory_on_device
 import accelerate
 
+sys.path.append(os.path.abspath("/kaggle/working/my_library"))
+import train_util
+
 # TPU-specific imports
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
@@ -24,7 +27,7 @@ from accelerate.utils import set_seed
 from diffusers import DDPMScheduler
 from library import deepspeed_utils, sdxl_model_util
 
-import library.train_util as train_util
+#import library.train_util as train_util
 
 from library.utils import setup_logging, add_logging_arguments
 
