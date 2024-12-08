@@ -550,7 +550,7 @@ class ControlNetSubset(BaseSubset):
         token_warmup_min,
         token_warmup_step,
     ) -> None:
-        assert image_dir is not None, "image_dir must be specified / image_dirは指定が必須です"
+        assert image_dir is not None, "image_dir must be specified"
 
         super().__init__(
             image_dir,
@@ -622,7 +622,7 @@ class BaseDataset(torch.utils.data.Dataset):
 
         self.tokenizer_max_length = self.tokenizers[0].model_max_length if max_token_length is None else max_token_length + 2
 
-        self.current_epoch: int = 0  # インスタンスがepochごとに新しく作られるようなので外側から渡さないとダメ
+        self.current_epoch: int = 0  # The instance seems to be newly created for each EPOCH, so you have to pass it from the outside.
 
         self.current_step: int = 0
         self.max_train_steps: int = 0
@@ -805,8 +805,8 @@ class BaseDataset(torch.utils.data.Dataset):
             iids_list = []
             if tokenizer.pad_token_id == tokenizer.eos_token_id:
                 # v1
-                # 77以上の時は "<BOS> .... <EOS> <EOS> <EOS>" でトータル227とかになっているので、"<BOS>...<EOS>"の三連に変換する
-                # 1111氏のやつは , で区切る、とかしているようだが　とりあえず単純に
+                # When it's 77 or more, it's “<BOS> .... <EOS> <EOS> <EOS>” for a total of 227 or so. <EOS>” to convert it to a triplet of ‘<EOS>’.
+                # I think Mr. 1111's is separated by a , or something like that, but I'm just going to keep it simple for now.
                 for i in range(
                     1, self.tokenizer_max_length - tokenizer.model_max_length + 2, tokenizer.model_max_length - 2
                 ):  # (1, 152, 75)
@@ -819,7 +819,7 @@ class BaseDataset(torch.utils.data.Dataset):
                     iids_list.append(ids_chunk)
             else:
                 # v2 or SDXL
-                # 77以上の時は "<BOS> .... <EOS> <PAD> <PAD>..." でトータル227とかになっているので、"<BOS>...<EOS> <PAD> <PAD> ..."の三連に変換する
+                # When it is 77 or more, "<bos> .... <eOS> <pad> <pad> ..." is a total of 227, so "<bos> <pad> <eOS> <pad> < Pad> ... "Converts to a triple.
                 for i in range(1, self.tokenizer_max_length - tokenizer.model_max_length + 2, tokenizer.model_max_length - 2):
                     ids_chunk = (
                         input_ids[0].unsqueeze(0),  # BOS
@@ -828,11 +828,11 @@ class BaseDataset(torch.utils.data.Dataset):
                     )  # PAD or EOS
                     ids_chunk = torch.cat(ids_chunk)
 
-                    # 末尾が <EOS> <PAD> または <PAD> <PAD> の場合は、何もしなくてよい
-                    # 末尾が x <PAD/EOS> の場合は末尾を <EOS> に変える（x <EOS> なら結果的に変化なし）
+                    # If the end is <eos> <pad> or <pad> <pad>, you don't have to do anything
+                    # If the end is X <Pad/EOS>, change the end to <EOS> (if x <eos> does not change as a result)
                     if ids_chunk[-2] != tokenizer.eos_token_id and ids_chunk[-2] != tokenizer.pad_token_id:
                         ids_chunk[-1] = tokenizer.eos_token_id
-                    # 先頭が <BOS> <PAD> ... の場合は <BOS> <EOS> <PAD> ... に変える
+                    # If the lead is <bos> <pad> ..., change to <bos> <eOS> <pad> ...
                     if ids_chunk[1] == tokenizer.pad_token_id:
                         ids_chunk[1] = tokenizer.eos_token_id
 
@@ -847,7 +847,7 @@ class BaseDataset(torch.utils.data.Dataset):
 
     def make_buckets(self):
         """
-        bucketingを行わない場合も呼び出し必須（ひとつだけbucketを作る）
+        Call required even if bucketing is not performed (only one bucket is created).
         min_size and max_size are ignored when enable_bucket is False
         """
         logger.info("loading image sizes.")
@@ -860,9 +860,9 @@ class BaseDataset(torch.utils.data.Dataset):
         else:
             logger.info("prepare dataset")
 
-        # bucketを作成し、画像をbucketに振り分ける
+        # Create bucket and distribute images to bucket
         if self.enable_bucket:
-            if self.bucket_manager is None:  # fine tuningの場合でmetadataに定義がある場合は、すでに初期化済み
+            if self.bucket_manager is None:  # If there is a definition in metadata in the case of fine tuning, it has already been initialized.
                 self.bucket_manager = BucketManager(
                     self.bucket_no_upscale,
                     (self.width, self.height),
@@ -890,7 +890,7 @@ class BaseDataset(torch.utils.data.Dataset):
             self.bucket_manager.sort()
         else:
             self.bucket_manager = BucketManager(False, (self.width, self.height), None, None, None)
-            self.bucket_manager.set_predefined_resos([(self.width, self.height)])  # ひとつの固定サイズbucketのみ
+            self.bucket_manager.set_predefined_resos([(self.width, self.height)])  # Only one fixed size Bucket
             for image_info in self.image_data.values():
                 image_width, image_height = image_info.image_size
                 image_info.bucket_reso, image_info.resized_size, _ = self.bucket_manager.select_bucket(image_width, image_height)
@@ -902,7 +902,7 @@ class BaseDataset(torch.utils.data.Dataset):
         # bucket情報を表示、格納する
         if self.enable_bucket:
             self.bucket_info = {"buckets": {}}
-            logger.info("number of images (including repeats) / 各bucketの画像枚数（繰り返し回数を含む）")
+            logger.info("number of images (including repeats)")
             for i, (reso, bucket) in enumerate(zip(self.bucket_manager.resos, self.bucket_manager.buckets)):
                 count = len(bucket)
                 if count > 0:
@@ -950,7 +950,7 @@ class BaseDataset(torch.utils.data.Dataset):
     def verify_bucket_reso_steps(self, min_steps: int):
         assert self.bucket_reso_steps is None or self.bucket_reso_steps % min_steps == 0, (
             f"bucket_reso_steps is {self.bucket_reso_steps}. it must be divisible by {min_steps}.\n"
-            + f"bucket_reso_stepsが{self.bucket_reso_steps}です。{min_steps}で割り切れる必要があります"
+            + f"bucket_reso_steps is {self.bucket_reso_steps}. it must be divisible by {min_steps}"
         )
 
     def is_latent_cacheable(self):
@@ -1217,7 +1217,7 @@ class BaseDataset(torch.utils.data.Dataset):
                     elif im_h > self.height or im_w > self.width:
                         assert (
                             subset.random_crop
-                        ), f"image too large, but cropping and bucketing are disabled / 画像サイズが大きいのでface_crop_aug_rangeかrandom_crop、またはbucketを有効にしてください: {image_info.absolute_path}"
+                        ), f"image too large, but cropping and bucketing are disabled: {image_info.absolute_path}"
                         if im_h > self.height:
                             p = random.randint(0, im_h - self.height)
                             img = img[p : p + self.height]
@@ -1228,7 +1228,7 @@ class BaseDataset(torch.utils.data.Dataset):
                     im_h, im_w = img.shape[0:2]
                     assert (
                         im_h == self.height and im_w == self.width
-                    ), f"image size is small / 画像サイズが小さいようです: {image_info.absolute_path}"
+                    ), f"image size is small: {image_info.absolute_path}"
 
                     original_size = [im_w, im_h]
                     crop_ltrb = (0, 0, 0, 0)
@@ -1435,7 +1435,7 @@ class DreamBoothDataset(BaseDataset):
     ) -> None:
         super().__init__(tokenizer, max_token_length, resolution, network_multiplier, debug_dataset)
 
-        assert resolution is not None, f"resolution is required / resolution（解像度）指定は必須です"
+        assert resolution is not None, f"resolution is required"
 
         self.batch_size = batch_size
         self.size = min(self.width, self.height)  # 短いほう
@@ -1446,10 +1446,10 @@ class DreamBoothDataset(BaseDataset):
         if self.enable_bucket:
             assert (
                 min(resolution) >= min_bucket_reso
-            ), f"min_bucket_reso must be equal or less than resolution / min_bucket_resoは最小解像度より大きくできません。解像度を大きくするかmin_bucket_resoを小さくしてください"
+            ), f"min_bucket_reso must be equal or less than resolution"
             assert (
                 max(resolution) <= max_bucket_reso
-            ), f"max_bucket_reso must be equal or greater than resolution / max_bucket_resoは最大解像度より小さくできません。解像度を小さくするかmin_bucket_resoを大きくしてください"
+            ), f"max_bucket_reso must be equal or greater than resolution"
             self.min_bucket_reso = min_bucket_reso
             self.max_bucket_reso = max_bucket_reso
             self.bucket_reso_steps = bucket_reso_steps
@@ -1476,9 +1476,9 @@ class DreamBoothDataset(BaseDataset):
                         try:
                             lines = f.readlines()
                         except UnicodeDecodeError as e:
-                            logger.error(f"illegal char in file (not UTF-8) / ファイルにUTF-8以外の文字があります: {cap_path}")
+                            logger.error(f"illegal char in file (not UTF-8): {cap_path}")
                             raise e
-                        assert len(lines) > 0, f"caption file is empty / キャプションファイルが空です: {cap_path}"
+                        assert len(lines) > 0, f"caption file is empty: {cap_path}"
                         if enable_wildcard:
                             caption = "\n".join([line.strip() for line in lines if line.strip() != ""])  # 空行を除く、改行で連結
                         else:
@@ -1495,12 +1495,12 @@ class DreamBoothDataset(BaseDataset):
             use_cached_info_for_subset = subset.cache_info
             if use_cached_info_for_subset:
                 logger.info(
-                    f"using cached image info for this subset / このサブセットで、キャッシュされた画像情報を使います: {info_cache_file}"
+                    f"using cached image info for this subset: {info_cache_file}"
                 )
                 if not os.path.isfile(info_cache_file):
                     logger.warning(
                         f"image info file not found. You can ignore this warning if this is the first time to use this subset"
-                        + " / キャッシュファイルが見つかりませんでした。初回実行時はこの警告を無視してください: {metadata_file}"
+                        + ": {metadata_file}"
                     )
                     use_cached_info_for_subset = False
 
@@ -1522,14 +1522,14 @@ class DreamBoothDataset(BaseDataset):
                 captions = [meta["caption"] for meta in metas.values()]
                 missing_captions = [img_path for img_path, caption in zip(img_paths, captions) if caption is None or caption == ""]
             else:
-                # 画像ファイルごとにプロンプトを読み込み、もしあればそちらを使う
+                # Read the prompt for each image file, and if any, use it
                 captions = []
                 missing_captions = []
                 for img_path in img_paths:
                     cap_for_img = read_caption(img_path, subset.caption_extension, subset.enable_wildcard)
                     if cap_for_img is None and subset.class_tokens is None:
                         logger.warning(
-                            f"neither caption file nor class tokens are found. use empty caption for {img_path} / キャプションファイルもclass tokenも見つかりませんでした。空のキャプションを使用します: {img_path}"
+                            f"neither caption file nor class tokens are found. use empty caption for {img_path}: {img_path}"
                         )
                         captions.append("")
                         missing_captions.append(img_path)
@@ -1548,7 +1548,7 @@ class DreamBoothDataset(BaseDataset):
                 remaining_missing_captions = number_of_missing_captions - number_of_missing_captions_to_show
 
                 logger.warning(
-                    f"No caption file found for {number_of_missing_captions} images. Training will continue without captions for these images. If class token exists, it will be used. / {number_of_missing_captions}枚の画像にキャプションファイルが見つかりませんでした。これらの画像についてはキャプションなしで学習を続行します。class tokenが存在する場合はそれを使います。"
+                    f"No caption file found for {number_of_missing_captions} images. Training will continue without captions for these images. If class token exists, it will be used. / {number_of_missing_captions}"
                 )
                 for i, missing_caption in enumerate(missing_captions):
                     if i >= number_of_missing_captions_to_show:
@@ -1557,14 +1557,14 @@ class DreamBoothDataset(BaseDataset):
                     logger.warning(missing_caption)
 
             if not use_cached_info_for_subset and subset.cache_info:
-                logger.info(f"cache image info for / 画像情報をキャッシュします : {info_cache_file}")
+                logger.info(f"cache image info for: {info_cache_file}")
                 sizes = [self.get_image_size(img_path) for img_path in tqdm(img_paths, desc="get image size")]
                 matas = {}
                 for img_path, caption, size in zip(img_paths, captions, sizes):
                     matas[img_path] = {"caption": caption, "resolution": list(size)}
                 with open(info_cache_file, "w", encoding="utf-8") as f:
                     json.dump(matas, f, ensure_ascii=False, indent=2)
-                logger.info(f"cache image info done for / 画像情報を出力しました : {info_cache_file}")
+                logger.info(f"cache image info done for: {info_cache_file}")
 
             # if sizes are not set, image size will be read in make_buckets
             return img_paths, captions, sizes
@@ -1576,20 +1576,20 @@ class DreamBoothDataset(BaseDataset):
         for subset in subsets:
             if subset.num_repeats < 1:
                 logger.warning(
-                    f"ignore subset with image_dir='{subset.image_dir}': num_repeats is less than 1 / num_repeatsが1を下回っているためサブセットを無視します: {subset.num_repeats}"
+                    f"ignore subset with image_dir='{subset.image_dir}': num_repeats is less than 1: {subset.num_repeats}"
                 )
                 continue
 
             if subset in self.subsets:
                 logger.warning(
-                    f"ignore duplicated subset with image_dir='{subset.image_dir}': use the first one / 既にサブセットが登録されているため、重複した後発のサブセットを無視します"
+                    f"ignore duplicated subset with image_dir='{subset.image_dir}': use the first one"
                 )
                 continue
 
             img_paths, captions, sizes = load_dreambooth_dir(subset)
             if len(img_paths) < 1:
                 logger.warning(
-                    f"ignore subset with image_dir='{subset.image_dir}': no images found / 画像が見つからないためサブセットを無視します"
+                    f"ignore subset with image_dir='{subset.image_dir}': no images found"
                 )
                 continue
 
@@ -1615,10 +1615,10 @@ class DreamBoothDataset(BaseDataset):
 
         logger.info(f"{num_reg_images} reg images.")
         if num_train_images < num_reg_images:
-            logger.warning("some of reg images are not used / 正則化画像の数が多いので、一部使用されない正則化画像があります")
+            logger.warning("some of reg images are not used")
 
         if num_reg_images == 0:
-            logger.warning("no regularization images / 正則化画像が見つかりませんでした")
+            logger.warning("no regularization images")
         else:
             # num_repeatsを計算する：どうせ大した数ではないのでループで処理する
             n = 0
@@ -1664,13 +1664,13 @@ class FineTuningDataset(BaseDataset):
         for subset in subsets:
             if subset.num_repeats < 1:
                 logger.warning(
-                    f"ignore subset with metadata_file='{subset.metadata_file}': num_repeats is less than 1 / num_repeatsが1を下回っているためサブセットを無視します: {subset.num_repeats}"
+                    f"ignore subset with metadata_file='{subset.metadata_file}': num_repeats is less than 1: {subset.num_repeats}"
                 )
                 continue
 
             if subset in self.subsets:
                 logger.warning(
-                    f"ignore duplicated subset with metadata_file='{subset.metadata_file}': use the first one / 既にサブセットが登録されているため、重複した後発のサブセットを無視します"
+                    f"ignore duplicated subset with metadata_file='{subset.metadata_file}': use the first one"
                 )
                 continue
             
@@ -1678,21 +1678,25 @@ class FineTuningDataset(BaseDataset):
                 logger.info(f"loading existing metadata: {subset.metadata_file}")
                 with open(subset.metadata_file, "rt", encoding="utf-8") as f:
                     metadata = json.load(f)
-                    img_mdf = {} #Create dict from metadata
-                    for img_data in metadata:
-                        key = os.path.splitext(os.path.basename(img_data['file_name']))[0] #Use file name as key (without extension)
-                        img_mdf[key] = img_data
-            else:
-                raise ValueError(f"no metadata / メタデータファイルがありません: {subset.metadata_file}")
+                    img_mdf = {} #If there is a metadata file create dictionary using file name as key
+                    if isinstance(metadata, list):
+                        for img_data in metadata:
+                            key = os.path.splitext(os.path.basename(img_data['file_name']))[0] #Use file name as key (without extension)
+                            img_mdf[key] = img_data
+                    elif isinstance(metadata, dict): #Handle dictionary
+                        img_mdf = metadata
+                    
+                    else:
+                        raise ValueError("...")
 
             if len(metadata) < 1:
                 logger.warning(
-                    f"ignore subset with '{subset.metadata_file}': no image entries found / 画像に関するデータが見つからないためサブセットを無視します"
+                    f"ignore subset with '{subset.metadata_file}': no image entries found"
                 )
                 continue
 
             tags_list = []
-            for image_key, img_md in metadata.items(): # Iterate through your metadata
+            for image_key, img_md in img_mdf.items(): # Iterate through your metadata
                 #Construct full absolute image path
                 image_path = os.path.join(subset.image_dir, img_md["file_name"])
                 abs_path = None
