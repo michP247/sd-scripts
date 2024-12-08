@@ -6,7 +6,6 @@ import os
 from multiprocessing import Value
 from typing import List
 import toml
-import sys
 
 from tqdm import tqdm
 
@@ -15,8 +14,10 @@ import torch.nn as nn  # Added this line
 from library.device_utils import init_ipex, clean_memory_on_device
 import accelerate
 
+import sys  # Import sys here
 sys.path.append(os.path.abspath("/kaggle/working/my_library"))
-import train_util
+import my_train_util as train_util  # Alias for consistency
+
 
 # TPU-specific imports
 import torch_xla.core.xla_model as xm
