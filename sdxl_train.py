@@ -209,10 +209,14 @@ def train(args):
         # TPU-specific initialization
         import torch_xla.core.xla_model as xm
         device = xm.xla_device()
+        print(f"Accelerate version before: {accelerate.__version__}")  
         accelerator = train_util.prepare_accelerator(args, device=device)
+        print(f"Accelerate version after: {accelerate.__version__}")
     else:
         # Original GPU/CPU setup
+        print(f"Accelerate version before: {accelerate.__version__}")  
         accelerator = train_util.prepare_accelerator(args)
+        print(f"Accelerate version after: {accelerate.__version__}")
 
     #Prepare a type that supports mixed Precision and Cast as appropriate
     weight_dtype, save_dtype = train_util.prepare_dtype(args)
