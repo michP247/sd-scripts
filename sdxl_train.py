@@ -910,42 +910,47 @@ def setup_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--use_cpu", action="store_true", help="use CPU instead of GPU")
     parser.add_argument("--sdxl", action="store_true", help="Use SDXL model / SDXLモデルを使用する")
+    parser.add_argument("--additional_parameters", type=str, default="")
+    parser.add_argument("--disable_mmap_load_safetensors", action="store_true")
+    parser.add_argument("--dynamo_mode", type=str, default="default")
+    parser.add_argument("--dynamo_use_dynamic", action="store_true")
+    parser.add_argument("--dynamo_use_fullgraph", action="store_true")
+    parser.add_argument("--epoch", type=int, default=1) #Consider renaming this to something like starting_epoch
+    parser.add_argument("--fused_backward_pass", action="store_true")
+    parser.add_argument("--gpu_ids", type=str, default="0")
+    parser.add_argument("--learning_rate_te", type=float, default=0)
+    parser.add_argument("--lr_warmup", type=float, default=0)  # Deprecated in diffusers, use lr_warmup_steps
+    parser.add_argument("--main_process_port", type=int, default=0)
+    parser.add_argument("--max_resolution", type=str, default="512,512")
+    parser.add_argument("--mem_eff_save", action="store_true")
+    parser.add_argument("--model_list", type=str, default="custom")
+    parser.add_argument("--model_prediction_type", type=str, default="raw")
+    parser.add_argument("--multi_gpu", action="store_true")
+    parser.add_argument("--no_metadata", action="store_true")
+    parser.add_argument("--no_token_padding", action="store_true")
+    parser.add_argument("--noise_offset_type", type=str, default="Original")
+    parser.add_argument("--num_cpu_threads_per_process", type=int, default=2)
+    parser.add_argument("--num_machines", type=int, default=1)
+    parser.add_argument("--num_processes", type=int, default=1)
+    parser.add_argument("--prior_loss_weight", type=float, default=1.0)
+    parser.add_argument("--save_as_bool", action="store_true")
+    parser.add_argument("--save_clip", action="store_true")
+    parser.add_argument("--single_blocks_to_swap", type=str, default=None)  # For single block swapping
+    parser.add_argument("--skip_cache_check", action="store_true")
+    parser.add_argument("--split_mode", action="store_true")
+    parser.add_argument("--stop_text_encoder_training", type=int, default=0)
+    parser.add_argument("--timestep_sampling", type=str, default="sigmoid")
+    #parser.add_argument("--use_tpu", action='store_true', default=False)
+    parser.add_argument("--weighting_scheme", type=str, default="logit_normal")
 
     return parser
 
 
-def load_config_from_toml(args, parser):
-    config_path = "/kaggle/working/log/config.toml"  # Or wherever your config is
-
-    if not os.path.exists(config_path):
-        print(f"No config file found at {config_path}. Using default arguments.")
-        return args
-
-    with open(config_path, "rb") as f:
-        config = tomli.load(f)
-
-    # Use a default dictionary to store any unrecognized parameters
-    unknown_args = {}
-
-    for key, value in config.items():
-        if hasattr(args, key):
-            setattr(args, key, value)
-        else:
-            # Collect unknown arguments
-            unknown_args[key] = value
-            print(f"Warning: Unknown parameter '{key}' in config file. Ignoring.") #If needed for logging/tracking unknown config params
-
-    # Store unknown arguments in the args namespace if needed
-    args.unknown_args = unknown_args if unknown_args else None
-
-    return args
- 
 if __name__ == "__main__":
     parser = setup_parser()
-    args = parser.parse_args()
-    train_util.verify_command_line_training_args(args)
 
-    # Load and merge config AFTER parsing initial arguments.
-    args = load_config_from_toml(args, parser)
+    args = parser.parse_args()
+    train_util.verify_commadnd_line_training_args(args)
+    args = train_util.read_config_from_file(args, parser)
 
     train(args)
