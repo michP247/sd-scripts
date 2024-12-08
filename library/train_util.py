@@ -29,6 +29,7 @@ import hashlib
 import subprocess
 from io import BytesIO
 import toml
+import sys
 
 from tqdm import tqdm
 
