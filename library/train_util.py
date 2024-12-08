@@ -1680,7 +1680,8 @@ class FineTuningDataset(BaseDataset):
                     metadata = json.load(f)
                     img_mdf = {} #Create dict from metadata
                     for img_data in metadata:
-                        key = os.path.splitext(os.path.basename(img_data['file_name']))[0] #Use file name as key (without extension)
+                        file_name, file_extension = os.path.splitext(img_data['file_name'])
+                        key = file_name #Use file name as key (without extension)
                         img_mdf[key] = img_data
             else:
                 raise ValueError(f"no metadata / メタデータファイルがありません: {subset.metadata_file}")
