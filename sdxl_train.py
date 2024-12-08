@@ -12,12 +12,6 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn  # Added this line
 from library.device_utils import init_ipex, clean_memory_on_device
-import accelerate
-
-import sys  # Import sys here
-sys.path.append(os.path.abspath("/kaggle/working/my_library"))
-import my_train_util as train_util  # Alias for consistency
-
 
 # TPU-specific imports
 import torch_xla.core.xla_model as xm
@@ -29,7 +23,7 @@ from accelerate.utils import set_seed
 from diffusers import DDPMScheduler
 from library import deepspeed_utils, sdxl_model_util
 
-#import library.train_util as train_util
+import library.train_util as train_util
 
 from library.utils import setup_logging, add_logging_arguments
 
@@ -215,14 +209,10 @@ def train(args):
         # TPU-specific initialization
         import torch_xla.core.xla_model as xm
         device = xm.xla_device()
-        print(f"Accelerate version before: {accelerate.__version__}")  
         accelerator = train_util.prepare_accelerator(args, device=device)
-        print(f"Accelerate version after: {accelerate.__version__}")
     else:
         # Original GPU/CPU setup
-        print(f"Accelerate version before: {accelerate.__version__}")  
         accelerator = train_util.prepare_accelerator(args)
-        print(f"Accelerate version after: {accelerate.__version__}")
 
     #Prepare a type that supports mixed Precision and Cast as appropriate
     weight_dtype, save_dtype = train_util.prepare_dtype(args)
@@ -919,10 +909,8 @@ def setup_parser() -> argparse.ArgumentParser:
         + f"U-Netの各ブロックの学習率、カンマ区切り、{UNET_NUM_BLOCKS_FOR_BLOCK_LR}個の値",
     )
     parser.add_argument("--use_cpu", action="store_true", help="use CPU instead of GPU")
-    #parser.add_argument("--num_processes", type=int, default=1, help="The total number of processes to be launched in parallel.")
-    #parser.add_argument("--num_machines", type=int, default=1, help="The total number of machines used in this training.")
-    #parser.add_argument("--num_cpu_threads_per_process", type=int, default=2, help="The number of CPU threads per process.")
-    #parser.add_argument("--downcast_bf16", action="store_true", help="Whether when using bf16 precision on TPUs if both float and double tensors are cast to bfloat16.")
+    parser.add_argument("--sdxl", action="store_true", help="Use SDXL model / SDXLモデルを使用する")
+
     return parser
 
 
