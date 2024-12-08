@@ -1,5 +1,7 @@
 # common functions for training
 
+#import accelerate
+from accelerate import Accelerator
 import argparse
 import ast
 import asyncio
