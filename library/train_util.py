@@ -4253,7 +4253,6 @@ def load_tokenizer(args: argparse.Namespace):
 
 
 def prepare_accelerator(args: argparse.Namespace, device=None):
-    print(f"Accelerate version: {accelerate.__version__}")
     """
     this function also prepares deepspeed plugin
     """
