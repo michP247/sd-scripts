@@ -908,6 +908,11 @@ def setup_parser() -> argparse.ArgumentParser:
         help=f"learning rates for each block of U-Net, comma-separated, {UNET_NUM_BLOCKS_FOR_BLOCK_LR} values / "
         + f"U-Netの各ブロックの学習率、カンマ区切り、{UNET_NUM_BLOCKS_FOR_BLOCK_LR}個の値",
     )
+    parser.add_argument("--use_cpu", action="store_true", help="use CPU instead of GPU")
+    #parser.add_argument("--num_processes", type=int, default=1, help="The total number of processes to be launched in parallel.")
+    #parser.add_argument("--num_machines", type=int, default=1, help="The total number of machines used in this training.")
+    #parser.add_argument("--num_cpu_threads_per_process", type=int, default=2, help="The number of CPU threads per process.")
+    #parser.add_argument("--downcast_bf16", action="store_true", help="Whether when using bf16 precision on TPUs if both float and double tensors are cast to bfloat16.")
     return parser
 
 
