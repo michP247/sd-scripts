@@ -4311,15 +4311,15 @@ def prepare_accelerator(args: argparse.Namespace, device=None):
             mixed_precision=args.mixed_precision,
             #cpu = args.use_cpu,
         )
-    else: # Handle device assignment only if not using DeepSpeed
-        accelerator = Accelerator(
+
+    else: # Standard Training
+        accelerator = accelerate.Accelerator(
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             mixed_precision=args.mixed_precision,
             cpu=args.use_cpu,
-            device_placement=False if device is not None else True, #prevent device placement by accelerate
+            device_placement=False if device is not None else True, #prevent accelerate from automatically placing devices
+            device=device #Setting device during init is preferred
         )
-        if device is not None:
-            accelerator.device = device
     print("accelerator device:", accelerator.device)
     return accelerator
 
