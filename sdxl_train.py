@@ -914,11 +914,38 @@ def setup_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def load_config_from_toml(args, parser):
+    config_path = "/kaggle/working/log/config.toml"  # Or wherever your config is
+
+    if not os.path.exists(config_path):
+        print(f"No config file found at {config_path}. Using default arguments.")
+        return args
+
+    with open(config_path, "rb") as f:
+        config = tomli.load(f)
+
+    # Use a default dictionary to store any unrecognized parameters
+    unknown_args = {}
+
+    for key, value in config.items():
+        if hasattr(args, key):
+            setattr(args, key, value)
+        else:
+            # Collect unknown arguments
+            unknown_args[key] = value
+            print(f"Warning: Unknown parameter '{key}' in config file. Ignoring.") #If needed for logging/tracking unknown config params
+
+    # Store unknown arguments in the args namespace if needed
+    args.unknown_args = unknown_args if unknown_args else None
+
+    return args
+ 
 if __name__ == "__main__":
     parser = setup_parser()
-
     args = parser.parse_args()
     train_util.verify_command_line_training_args(args)
-    args = train_util.read_config_from_file(args, parser)
+
+    # Load and merge config AFTER parsing initial arguments.
+    args = load_config_from_toml(args, parser)
 
     train(args)
