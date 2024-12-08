@@ -1,7 +1,5 @@
 # common functions for training
 
-#import accelerate
-from accelerate import Accelerator
 import argparse
 import ast
 import asyncio
@@ -4315,7 +4313,7 @@ def prepare_accelerator(args: argparse.Namespace, device=None):
         )
 
     else: # Standard Training
-        accelerator = accelerate.Accelerator(
+        accelerator = Accelerator(
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             mixed_precision=args.mixed_precision,
             cpu=args.use_cpu,
