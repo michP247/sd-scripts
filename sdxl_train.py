@@ -109,10 +109,10 @@ def train(args):
 
     assert (
         not args.weighted_captions
-    ), "weighted_captions is not supported currently / weighted_captionsは現在サポートされていません"
+    ), "weighted_captions is not supported currently"
     assert (
         not args.train_text_encoder or not args.cache_text_encoder_outputs
-    ), "cache_text_encoder_outputs is not supported when training text encoder / text encoderを学習するときはcache_text_encoder_outputsはサポートされていません"
+    ), "cache_text_encoder_outputs is not supported when training text encoder"
 
     if args.block_lr:
         block_lrs = [float(lr) for lr in args.block_lr.split(",")]

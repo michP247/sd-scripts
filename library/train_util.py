@@ -1031,7 +1031,7 @@ class BaseDataset(torch.utils.data.Dataset):
         assert len(tokenizers) == 2, "only support SDXL"
 
         # latentsのキャッシュと同様に、ディスクへのキャッシュに対応する
-        # またマルチGPUには対応していないので、そちらはtools/cache_latents.pyを使うこと
+        # Also, multi-GPU is not supported, so use tools/cache_latents.py for that.
         logger.info("caching text encoder outputs.")
         image_infos = list(self.image_data.values())
 
@@ -1687,7 +1687,7 @@ class FineTuningDataset(BaseDataset):
                         img_mdf = metadata
                     
                     else:
-                        raise ValueError("...")
+                        raise ValueError("no metadata...")
 
             if len(metadata) < 1:
                 logger.warning(
@@ -4252,7 +4252,7 @@ def load_tokenizer(args: argparse.Namespace):
     return tokenizer
 
 
-def prepare_accelerator(args: argparse.Namespace):
+def prepare_accelerator(args: argparse.Namespace, device=None):
     """
     this function also prepares deepspeed plugin
     """
@@ -4273,20 +4273,20 @@ def prepare_accelerator(args: argparse.Namespace):
         if log_with in ["tensorboard", "all"]:
             if logging_dir is None:
                 raise ValueError(
-                    "logging_dir is required when log_with is tensorboard / Tensorboardを使う場合、logging_dirを指定してください"
+                    "logging_dir is required when log_with is tensorboard"
                 )
         if log_with in ["wandb", "all"]:
             try:
                 import wandb
             except ImportError:
-                raise ImportError("No wandb / wandb がインストールされていないようです")
+                raise ImportError("No wandb")
             if logging_dir is not None:
                 os.makedirs(logging_dir, exist_ok=True)
                 os.environ["WANDB_DIR"] = logging_dir
             if args.wandb_api_key is not None:
                 wandb.login(key=args.wandb_api_key)
 
-    # torch.compile のオプション。 NO の場合は torch.compile は使わない
+    # Options for torch.compile. If NO, torch.compile is not used.
     dynamo_backend = "NO"
     if args.torch_compile:
         dynamo_backend = args.dynamo_backend
@@ -4304,15 +4304,22 @@ def prepare_accelerator(args: argparse.Namespace):
     kwargs_handlers = list(filter(lambda x: x is not None, kwargs_handlers))
     deepspeed_plugin = deepspeed_utils.prepare_deepspeed_plugin(args)
 
-    accelerator = Accelerator(
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        mixed_precision=args.mixed_precision,
-        log_with=log_with,
-        project_dir=logging_dir,
-        kwargs_handlers=kwargs_handlers,
-        dynamo_backend=dynamo_backend,
-        deepspeed_plugin=deepspeed_plugin,
-    )
+    if args.deepspeed:
+        # DeepSpeed uses its own device assignment, so don't set here
+        accelerator = Accelerator(
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            mixed_precision=args.mixed_precision,
+            #cpu = args.use_cpu,
+        )
+    else: # Handle device assignment only if not using DeepSpeed
+        accelerator = Accelerator(
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            mixed_precision=args.mixed_precision,
+            cpu=args.use_cpu,
+            device_placement=False if device is not None else True, #prevent device placement by accelerate
+        )
+        if device is not None:
+            accelerator.device = device
     print("accelerator device:", accelerator.device)
     return accelerator
 
