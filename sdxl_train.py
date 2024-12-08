@@ -12,6 +12,7 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn  # Added this line
 from library.device_utils import init_ipex, clean_memory_on_device
+import accelerate
 
 # TPU-specific imports
 import torch_xla.core.xla_model as xm
