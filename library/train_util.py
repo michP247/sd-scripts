@@ -1673,12 +1673,15 @@ class FineTuningDataset(BaseDataset):
                     f"ignore duplicated subset with metadata_file='{subset.metadata_file}': use the first one / 既にサブセットが登録されているため、重複した後発のサブセットを無視します"
                 )
                 continue
-
-            # メタデータを読み込む
-            if os.path.exists(subset.metadata_file):
+            
+            if subset.metadata_file and os.path.exists(subset.metadata_file):
                 logger.info(f"loading existing metadata: {subset.metadata_file}")
                 with open(subset.metadata_file, "rt", encoding="utf-8") as f:
                     metadata = json.load(f)
+                    img_mdf = {} #Create dict from metadata
+                    for img_data in metadata:
+                        key = os.path.splitext(os.path.basename(img_data['file_name']))[0] #Use file name as key (without extension)
+                        img_mdf[key] = img_data
             else:
                 raise ValueError(f"no metadata / メタデータファイルがありません: {subset.metadata_file}")
 
@@ -1689,27 +1692,22 @@ class FineTuningDataset(BaseDataset):
                 continue
 
             tags_list = []
-            for image_key, img_md in metadata.items():
-                # path情報を作る
+            for image_key, img_md in metadata.items(): # Iterate through your metadata
+                #Construct full absolute image path
+                image_path = os.path.join(subset.image_dir, img_md["file_name"])
                 abs_path = None
+                if os.path.exists(image_path):
+                    abs_path = image_path
 
-                # まず画像を優先して探す
-                if os.path.exists(image_key):
-                    abs_path = image_key
-                else:
-                    # わりといい加減だがいい方法が思いつかん
-                    paths = glob_images(subset.image_dir, image_key)
-                    if len(paths) > 0:
-                        abs_path = paths[0]
 
-                # なければnpzを探す
-                if abs_path is None:
-                    if os.path.exists(os.path.splitext(image_key)[0] + ".npz"):
-                        abs_path = os.path.splitext(image_key)[0] + ".npz"
-                    else:
-                        npz_path = os.path.join(subset.image_dir, image_key + ".npz")
-                        if os.path.exists(npz_path):
-                            abs_path = npz_path
+                if abs_path is None:  # Try with npz extension
+                    npz_path = os.path.splitext(image_path)[0] + ".npz"
+                    if os.path.exists(npz_path):
+                        abs_path = npz_path
+
+                if abs_path is None:  # Still not found, log a warning and skip the image.
+                    logger.warning(f"Image not found: {image_path} or {npz_path}. Skipping.") #This now prints out the absolute path it can't find
+                    continue #Skip the image
 
                 assert abs_path is not None, f"no image / 画像がありません: {image_key}"
 
