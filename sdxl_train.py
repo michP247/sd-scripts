@@ -565,13 +565,13 @@ def train(args, train_dataloader=None):
                                 latents = torch.nan_to_num(latents, 0, out=latents)
                     latents = latents * sdxl_model_util.VAE_SCALE_FACTOR
 
-                    #Move all inputs to the device BEFORE doing anything else.
+                    """ #Move all inputs to the device BEFORE doing anything else.
                     input_ids1 = batch["input_ids"].to(accelerator.device)
                     input_ids2 = batch["input_ids2"].to(accelerator.device)
 
                     orig_size = batch["original_sizes_hw"].to(accelerator.device)
                     crop_size = batch["crop_top_lefts"].to(accelerator.device)
-                    target_size = batch["target_sizes_hw"].to(accelerator.device)
+                    target_size = batch["target_sizes_hw"].to(accelerator.device) """
 
                 if "text_encoder_outputs1_list" not in batch or batch["text_encoder_outputs1_list"] is None:
                     input_ids1 = batch["input_ids"]
@@ -640,10 +640,10 @@ def train(args, train_dataloader=None):
 
                 noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents)
 
-                # device was set earlier, no need to do this:
-                # if getattr(args, 'use_tpu', False):
-                #     noisy_latents = noisy_latents.to(accelerator.device, dtype=weight_dtype)
-                #     timesteps = timesteps.to(accelerator.device)
+                print(f"Device of noisy_latents: {noisy_latents.device}")
+                print(f"Device of timesteps: {timesteps.device}")
+                print(f"Device of text_embedding: {text_embedding.device}")
+                print(f"Device of vector_embedding: {vector_embedding.device}")
 
                 with accelerator.autocast(): #Keep unet inside the TPU context to prevent errors.
                     noise_pred = unet(noisy_latents, timesteps, text_embedding, vector_embedding)

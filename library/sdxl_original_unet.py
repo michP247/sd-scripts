@@ -842,7 +842,7 @@ class SdxlUNet2DConditionModel(nn.Module):
             nn.Linear(self.model_channels, self.time_embed_dim),
             nn.SiLU(),
             nn.Linear(self.time_embed_dim, self.time_embed_dim),
-        ).to(x.dtype)
+        )
         # label embedding
         self.label_emb = nn.Sequential(
             nn.Sequential(
@@ -850,7 +850,7 @@ class SdxlUNet2DConditionModel(nn.Module):
                 nn.SiLU(),
                 nn.Linear(self.time_embed_dim, self.time_embed_dim),
             )
-        ).to(x.dtype)
+        )
         # input
         self.input_blocks = nn.ModuleList(
             [
