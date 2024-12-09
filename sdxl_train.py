@@ -49,9 +49,7 @@ from library.custom_train_functions import (
 )
 from library.sdxl_original_unet import SdxlUNet2DConditionModel
 
-
 UNET_NUM_BLOCKS_FOR_BLOCK_LR = 23
-
 
 def get_block_params_to_optimize(unet: SdxlUNet2DConditionModel, block_lrs: List[float]) -> List[dict]:
     block_params = [[] for _ in range(len(block_lrs))]
@@ -80,7 +78,6 @@ def get_block_params_to_optimize(unet: SdxlUNet2DConditionModel, block_lrs: List
 
     return params_to_optimize
 
-
 def append_block_lr_to_logs(block_lrs, logs, lr_scheduler, optimizer_type):
     names = []
     block_index = 0
@@ -98,7 +95,6 @@ def append_block_lr_to_logs(block_lrs, logs, lr_scheduler, optimizer_type):
         block_index += 1
 
     train_util.append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names)
-
 
 def train(args, train_dataloader=None):
     print("Starting training...")
@@ -540,17 +536,10 @@ def train(args, train_dataloader=None):
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
 
-            if getattr(args, 'use_tpu', False):
-                # Ensure all tensors are on the TPU device
-                for key in batch:
-                    if isinstance(batch[key], torch.Tensor):
-                        batch[key] = batch[key].to(xm.xla_device())
-
-            
             with accelerator.accumulate(*training_models):
                 if getattr(args, 'use_tpu', False):
                     # TPU Codepath: Transfer tensors within the TPU context.
-                    input_ids1 = batch["input_ids"].to(device) #Moved outside with other tensors.
+                    input_ids1 = batch["input_ids"].to(device)
                     input_ids2 = batch["input_ids2"].to(device)
                 
                     if "latents" in batch and batch["latents"] is not None:
@@ -636,35 +625,31 @@ def train(args, train_dataloader=None):
                     # assert ((pool2.to("cpu") - p2.to(dtype=weight_dtype)).abs().max() > 1e-2).sum() <= b_size * 2
                     # logger.info("text encoder outputs verified")
 
-                if getattr(args, 'use_tpu', False):
-                  embs = xm.xla_device()(lambda: sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype))()
-                  vector_embedding = xm.xla_device()(lambda: sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype))()
-                else:
-                  embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
-                  vector_embedding = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
-
-                # Get size embeddings *after* moving input tensors to device
-                orig_size = batch["original_sizes_hw"].to(accelerator.device)
-                crop_size = batch["crop_top_lefts"].to(accelerator.device)
-                target_size = batch["target_sizes_hw"].to(accelerator.device)
-                embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
-                vector_embedding = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
+                # Get size embeddings. These operations need to be on the right device.
+                orig_size = orig_size.to(device if getattr(args, 'use_tpu', False) else accelerator.device)
+                crop_size = crop_size.to(device if getattr(args, 'use_tpu', False) else accelerator.device)
+                target_size = target_size.to(device if getattr(args, 'use_tpu', False) else accelerator.device)
+                
+                embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, device if getattr(args, 'use_tpu', False) else accelerator.device).to(weight_dtype)
+                vector_embedding = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, device if getattr(args, 'use_tpu', False) else accelerator.device).to(weight_dtype)
 
                 # Concatenate embeddings after they have been computed
                 text_embedding = torch.cat([encoder_hidden_states1, encoder_hidden_states2], dim=2).to(weight_dtype)
                 #Place text_embedding on the correct device.
-                text_embedding.to(accelerator.device)
+                text_embedding = text_embedding.to(device if getattr(args, 'use_tpu', False) else accelerator.device)
 
                 noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents)
-                if getattr(args, 'use_tpu', False):
-                    noisy_latents = noisy_latents.to(accelerator.device, dtype=weight_dtype)
-                    timesteps = timesteps.to(accelerator.device)
 
-                    with accelerator.autocast(): #Keep unet inside the TPU context to prevent errors.
-                        noise_pred = unet(noisy_latents, timesteps, text_embedding.to(accelerator.device), vector_embedding)
+                # device was set earlier, no need to do this:
+                # if getattr(args, 'use_tpu', False):
+                #     noisy_latents = noisy_latents.to(accelerator.device, dtype=weight_dtype)
+                #     timesteps = timesteps.to(accelerator.device)
 
-                    target = noise.to(accelerator.device) #target noise needs to be placed onto the device.
-                    loss = train_util.conditional_loss(noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c) #Loss calculation also needs to be on-device, to keep operations within the XLA graph
+                with accelerator.autocast(): #Keep unet inside the TPU context to prevent errors.
+                    noise_pred = unet(noisy_latents, timesteps, text_embedding, vector_embedding)
+
+                target = noise.to(device if getattr(args, 'use_tpu', False) else accelerator.device) #target noise needs to be placed onto the device.
+                loss = train_util.conditional_loss(noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c) #Loss calculation also needs to be on-device, to keep operations within the XLA graph
 
                 if (
                     args.min_snr_gamma
@@ -694,7 +679,6 @@ def train(args, train_dataloader=None):
 
                 #Backward pass
                 accelerator.backward(loss)
-
 
                 if getattr(args, 'use_tpu', False):
                     if accelerator.sync_gradients and args.max_grad_norm != 0.0:
@@ -868,7 +852,6 @@ def train(args, train_dataloader=None):
             )
         logger.info("model saved.")
 
-
 def setup_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
 
@@ -950,7 +933,6 @@ def setup_parser() -> argparse.ArgumentParser:
     parser.add_argument("--network_multiplier", type=float, default=1.0)
 
     return parser
-
 
 if __name__ == "__main__":
     parser = setup_parser()
