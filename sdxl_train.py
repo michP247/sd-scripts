@@ -209,7 +209,6 @@ def train(args, train_dataloader=None):
 
     if getattr(args, 'use_tpu', False):
         # TPU-specific initialization
-        import torch_xla.core.xla_model as xm
         device = xm.xla_device()
         accelerator = train_util.prepare_accelerator(args, device=device)
     else:
@@ -230,12 +229,7 @@ def train(args, train_dataloader=None):
         logit_scale,
         ckpt_info,
     ) = sdxl_train_util.load_target_model(args, accelerator, "sdxl", weight_dtype)
-    
-    # Add these lines here, after loading the unet:
-    if getattr(args, 'use_tpu', False):
-        unet.to(device)
-        unet.time_embed.to(device)
-        unet.label_emb.to(device)
+    # logit_scale = logit_scale.to(accelerator.device, dtype=weight_dtype)
 
     # verify load/save model formats
     if load_stable_diffusion_format:
@@ -276,6 +270,12 @@ def train(args, train_dataloader=None):
         train_util.replace_unet_modules(unet, args.mem_eff_attn, args.xformers, args.sdpa)
         if torch.__version__ >= "2.0.0":  # PyTorch 2.0.0 以上対応のxformersなら以下が使える
             vae.set_use_memory_efficient_attention_xformers(args.xformers)
+
+    # move weights to TPU if training on TPU
+    if getattr(args, 'use_tpu', False):
+        unet.to(device)
+        unet.time_embed.to(device)
+        unet.label_emb.to(device)
 
     # Prepare learning
     if cache_latents:
@@ -570,13 +570,13 @@ def train(args, train_dataloader=None):
                                 latents = torch.nan_to_num(latents, 0, out=latents)
                     latents = latents * sdxl_model_util.VAE_SCALE_FACTOR
 
-                    """ #Move all inputs to the device BEFORE doing anything else.
+                    #Move all inputs to the device BEFORE doing anything else.
                     input_ids1 = batch["input_ids"].to(accelerator.device)
                     input_ids2 = batch["input_ids2"].to(accelerator.device)
 
                     orig_size = batch["original_sizes_hw"].to(accelerator.device)
                     crop_size = batch["crop_top_lefts"].to(accelerator.device)
-                    target_size = batch["target_sizes_hw"].to(accelerator.device) """
+                    target_size = batch["target_sizes_hw"].to(accelerator.device)
 
                 if "text_encoder_outputs1_list" not in batch or batch["text_encoder_outputs1_list"] is None:
                     input_ids1 = batch["input_ids"]
@@ -643,7 +643,15 @@ def train(args, train_dataloader=None):
                 #Place text_embedding on the correct device.
                 text_embedding = text_embedding.to(device if getattr(args, 'use_tpu', False) else accelerator.device)
 
-                noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents)
+                #Move noise and related tensors to device
+                noise = torch.randn_like(latents, device=device)
+                noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+                timesteps = timesteps.to(device)
+
+                # device was set earlier, no need to do this:
+                # if getattr(args, 'use_tpu', False):
+                #     noisy_latents = noisy_latents.to(accelerator.device, dtype=weight_dtype)
+                #     timesteps = timesteps.to(accelerator.device)
 
                 print(f"Device of noisy_latents: {noisy_latents.device}")
                 print(f"Device of timesteps: {timesteps.device}")
@@ -698,7 +706,7 @@ def train(args, train_dataloader=None):
                         #accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
                 
                     #Optimizer step
-                    optimizer.step()
+                    #optimizer.step()
                     if getattr(args, 'use_tpu', False):
                         xm.optimizer_step(optimizer, barrier=True) # Use xm.optimizer_step
                         lr_scheduler.step()

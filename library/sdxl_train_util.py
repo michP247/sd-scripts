@@ -204,7 +204,8 @@ def get_size_embeddings(orig_size, crop_size, target_size, device):
     emb3 = get_timestep_embedding(target_size, 256, device)
 
     vector = torch.cat([emb1, emb2, emb3], dim=1)
-    return vector.to(device)
+    print(f"Device of size embeddings (inside get_size_embeddings): {target_size.device}")
+    return target_size
 
 
 def save_sd_model_on_train_end(
