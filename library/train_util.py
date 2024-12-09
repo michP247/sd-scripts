@@ -1664,46 +1664,45 @@ class FineTuningDataset(BaseDataset):
         for subset in subsets:
             if subset.num_repeats < 1:
                 logger.warning(
-                    f"ignore subset with metadata_file='{subset.metadata_file}': num_repeats is less than 1: {subset.num_repeats}"
+                    f"ignore subset with metadata_file='{subset.metadata_file}': num_repeats is less than 1 / num_repeatsが1を下回っているためサブセットを無視します: {subset.num_repeats}"
                 )
                 continue
 
             if subset in self.subsets:
                 logger.warning(
-                    f"ignore duplicated subset with metadata_file='{subset.metadata_file}': use the first one"
+                    f"ignore duplicated subset with metadata_file='{subset.metadata_file}': use the first one / 既にサブセットが登録されているため、重複した後発のサブセットを無視します"
                 )
                 continue
 
-            # Read metadata
+            # メタデータを読み込む
             if os.path.exists(subset.metadata_file):
                 logger.info(f"loading existing metadata: {subset.metadata_file}")
                 with open(subset.metadata_file, "rt", encoding="utf-8") as f:
                     metadata = json.load(f)
             else:
-                raise ValueError(f"no metadata: {subset.metadata_file}")
+                raise ValueError(f"no metadata / メタデータファイルがありません: {subset.metadata_file}")
 
             if len(metadata) < 1:
                 logger.warning(
-                    f"ignore subset with '{subset.metadata_file}': no image entries found"
+                    f"ignore subset with '{subset.metadata_file}': no image entries found / 画像に関するデータが見つからないためサブセットを無視します"
                 )
                 continue
 
             tags_list = []
-            #loaded_image_count = 0
             for image_key, img_md in metadata.items():
-                # Create PATH information
+                # path情報を作る
                 abs_path = None
 
-                # Search for images first and foremost.
+                # まず画像を優先して探す
                 if os.path.exists(image_key):
                     abs_path = image_key
                 else:
-                    # I can't think of a better way to do it, although it's rather lax.
+                    # わりといい加減だがいい方法が思いつかん
                     paths = glob_images(subset.image_dir, image_key)
                     if len(paths) > 0:
                         abs_path = paths[0]
 
-                # If not, look for npz.
+                # なければnpzを探す
                 if abs_path is None:
                     if os.path.exists(os.path.splitext(image_key)[0] + ".npz"):
                         abs_path = os.path.splitext(image_key)[0] + ".npz"
@@ -1712,7 +1711,7 @@ class FineTuningDataset(BaseDataset):
                         if os.path.exists(npz_path):
                             abs_path = npz_path
 
-                assert abs_path is not None, f"no image: {image_key}"
+                assert abs_path is not None, f"no image / 画像がありません: {image_key}"
 
                 caption = img_md.get("caption")
                 tags = img_md.get("tags")
@@ -1835,6 +1834,33 @@ class FineTuningDataset(BaseDataset):
         if not use_npz_latents:
             for image_info in self.image_data.values():
                 image_info.latents_npz = image_info.latents_npz_flipped = None
+
+    def image_key_to_npz_file(self, subset: FineTuningSubset, image_key):
+        base_name = os.path.splitext(image_key)[0]
+        npz_file_norm = base_name + ".npz"
+
+        if os.path.exists(npz_file_norm):
+            # image_key is full path
+            npz_file_flip = base_name + "_flip.npz"
+            if not os.path.exists(npz_file_flip):
+                npz_file_flip = None
+            return npz_file_norm, npz_file_flip
+
+        # if not full path, check image_dir. if image_dir is None, return None
+        if subset.image_dir is None:
+            return None, None
+
+        # image_key is relative path
+        npz_file_norm = os.path.join(subset.image_dir, image_key + ".npz")
+        npz_file_flip = os.path.join(subset.image_dir, image_key + "_flip.npz")
+
+        if not os.path.exists(npz_file_norm):
+            npz_file_norm = None
+            npz_file_flip = None
+        elif not os.path.exists(npz_file_flip):
+            npz_file_flip = None
+
+        return npz_file_norm, npz_file_flip
 
 
 class ControlNetDataset(BaseDataset):
