@@ -192,15 +192,17 @@ def get_timestep_embedding(x, outdim, device):
     assert len(x.shape) == 2
     b, dims = x.shape[0], x.shape[1]
     x = torch.flatten(x)
-    emb = timestep_embedding(x, outdim, device=device) # Pass device keyword argument
+    emb = timestep_embedding(x, outdim, device=device)
     emb = torch.reshape(emb, (b, dims * outdim))
     return emb
 
 
 def get_size_embeddings(orig_size, crop_size, target_size, device):
-    emb1 = get_timestep_embedding(orig_size.to(device), 256, device)
-    emb2 = get_timestep_embedding(crop_size.to(device), 256, device)
-    emb3 = get_timestep_embedding(target_size.to(device), 256, device)
+
+    emb1 = get_timestep_embedding(orig_size, 256, device)
+    emb2 = get_timestep_embedding(crop_size, 256, device)
+    emb3 = get_timestep_embedding(target_size, 256, device)
+
     vector = torch.cat([emb1, emb2, emb3], dim=1)
     return vector.to(device)
 

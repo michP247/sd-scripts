@@ -534,7 +534,7 @@ def train(args, train_dataloader=None):
                     if isinstance(batch[key], torch.Tensor):
                         batch[key] = batch[key].to(xm.xla_device())
 
-
+            
             with accelerator.accumulate(*training_models):
                 if "latents" in batch and batch["latents"] is not None:
                     latents = batch["latents"].to(accelerator.device).to(dtype=weight_dtype)
@@ -548,6 +548,9 @@ def train(args, train_dataloader=None):
                             accelerator.print("NaN found in latents, replacing with zeros")
                             latents = torch.nan_to_num(latents, 0, out=latents)
                 latents = latents * sdxl_model_util.VAE_SCALE_FACTOR
+
+                # Ensure timesteps are on the accelerator device
+                timesteps = timesteps.to(accelerator.device)
 
                 if "text_encoder_outputs1_list" not in batch or batch["text_encoder_outputs1_list"] is None:
                     input_ids1 = batch["input_ids"]
@@ -601,15 +604,14 @@ def train(args, train_dataloader=None):
                     # assert ((pool2.to("cpu") - p2.to(dtype=weight_dtype)).abs().max() > 1e-2).sum() <= b_size * 2
                     # logger.info("text encoder outputs verified")
 
-                # get size embeddings
-                orig_size = batch["original_sizes_hw"]
-                crop_size = batch["crop_top_lefts"]
-                target_size = batch["target_sizes_hw"]
+                # get size embeddings, ensure inputs are on device *before* passing to functions
+                orig_size = batch["original_sizes_hw"].to(accelerator.device)
+                crop_size = batch["crop_top_lefts"].to(accelerator.device)
+                target_size = batch["target_sizes_hw"].to(accelerator.device)
                 embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
 
                 # concat embeddings
                 vector_embedding = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
-                vector_embedding = vector_embedding.to(accelerator.device)  # Move to TPU
                 text_embedding = torch.cat([encoder_hidden_states1, encoder_hidden_states2], dim=2).to(weight_dtype)
 
                 # Sample noise, sample a random timestep for each image, and add noise to the latents,
