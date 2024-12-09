@@ -98,7 +98,7 @@ def append_block_lr_to_logs(block_lrs, logs, lr_scheduler, optimizer_type):
         block_index += 1
 
     train_util.append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names)
-    
+
 
 def train(args, train_dataloader):
     train_util.verify_training_args(args)
@@ -171,6 +171,7 @@ def train(args, train_dataloader):
                 }
     #After the conditional block:
     if args.dataset_class is None: #Only generate the blueprint if NOT using a custom dataset class
+            blueprint_generator = BlueprintGenerator(ConfigSanitizer(True, True, args.masked_loss, True))
             blueprint = blueprint_generator.generate(user_config, args, tokenizer=[tokenizer1, tokenizer2])
             train_dataset_group = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
     else:
