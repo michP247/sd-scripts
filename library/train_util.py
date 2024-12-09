@@ -1184,6 +1184,24 @@ class BaseDataset(torch.utils.data.Dataset):
         if self.caching_mode is not None:  # return batch for latents/text encoder outputs caching
             return self.get_item_for_caching(bucket, bucket_batch_size, image_index)
 
+        batch = []
+        for image_key in bucket[image_index : image_index + bucket_batch_size]:
+
+            try: #Try to load the example
+                image_info = self.image_data[image_key]
+                subset = self.image_to_subset[image_key]
+                batch.append(image_info) #Append example info only IF loading was successful.
+
+            #Skip example if any exception occurs.
+            except Exception as e: 
+                print(f"Exception encountered in getitem for image {image_key} in bucket: {bucket}. Skipping. Exception details: {e}")
+                continue
+
+        #If batch is still somehow empty
+        if not batch:
+            print(f"Bucket {bucket} is unexpectedly empty after skipping faulty images. Returning first example in dataset.") #This will happen if every image in the bucket is somehow invalid and skipped.
+            return self.__getitem__(0) #Return first item in dataset rather than None.
+        
         loss_weights = []
         captions = []
         input_ids_list = []
@@ -1198,8 +1216,8 @@ class BaseDataset(torch.utils.data.Dataset):
         text_encoder_outputs2_list = []
         text_encoder_pool2_list = []
 
-        for image_key in bucket[image_index : image_index + bucket_batch_size]:
-            image_info = self.image_data[image_key]
+        for image_info in batch:
+            #image_info = self.image_data[image_key]
             subset = self.image_to_subset[image_key]
             loss_weights.append(
                 self.prior_loss_weight if image_info.is_reg else 1.0
@@ -1235,7 +1253,7 @@ class BaseDataset(torch.utils.data.Dataset):
                         subset.random_crop, img, image_info.bucket_reso, image_info.resized_size
                     )
                 else:
-                    if face_cx > 0:  # 顔位置情報あり
+                    if face_cx > 0:  # There is face position information
                         img = self.crop_target(subset, img, face_cx, face_cy, face_w, face_h)
                     elif im_h > self.height or im_w > self.width:
                         assert (
@@ -1267,63 +1285,63 @@ class BaseDataset(torch.utils.data.Dataset):
                 latents = None
                 image = self.image_transforms(img)  # -1.0~1.0のtorch.Tensorになる
 
-            images.append(image)
-            latents_list.append(latents)
+        images.append(image)
+        latents_list.append(latents)
 
-            target_size = (image.shape[2], image.shape[1]) if image is not None else (latents.shape[2] * 8, latents.shape[1] * 8)
+        target_size = (image.shape[2], image.shape[1]) if image is not None else (latents.shape[2] * 8, latents.shape[1] * 8)
 
-            if not flipped:
-                crop_left_top = (crop_ltrb[0], crop_ltrb[1])
+        if not flipped:
+            crop_left_top = (crop_ltrb[0], crop_ltrb[1])
+        else:
+            # crop_ltrb[2] is right, so target_size[0] - crop_ltrb[2] is left in flipped image
+            crop_left_top = (target_size[0] - crop_ltrb[2], crop_ltrb[1])
+
+        original_sizes_hw.append((int(original_size[1]), int(original_size[0])))
+        crop_top_lefts.append((int(crop_left_top[1]), int(crop_left_top[0])))
+        target_sizes_hw.append((int(target_size[1]), int(target_size[0])))
+        flippeds.append(flipped)
+
+        # captionとtext encoder outputを処理する
+        caption = image_info.caption  # default
+        if image_info.text_encoder_outputs1 is not None:
+            text_encoder_outputs1_list.append(image_info.text_encoder_outputs1)
+            text_encoder_outputs2_list.append(image_info.text_encoder_outputs2)
+            text_encoder_pool2_list.append(image_info.text_encoder_pool2)
+            captions.append(caption)
+        elif image_info.text_encoder_outputs_npz is not None:
+            text_encoder_outputs1, text_encoder_outputs2, text_encoder_pool2 = load_text_encoder_outputs_from_disk(
+                image_info.text_encoder_outputs_npz
+            )
+            text_encoder_outputs1_list.append(text_encoder_outputs1)
+            text_encoder_outputs2_list.append(text_encoder_outputs2)
+            text_encoder_pool2_list.append(text_encoder_pool2)
+            captions.append(caption)
+        else:
+            caption = self.process_caption(subset, image_info.caption)
+            if self.XTI_layers:
+                caption_layer = []
+                for layer in self.XTI_layers:
+                    token_strings_from = " ".join(self.token_strings)
+                    token_strings_to = " ".join([f"{x}_{layer}" for x in self.token_strings])
+                    caption_ = caption.replace(token_strings_from, token_strings_to)
+                    caption_layer.append(caption_)
+                captions.append(caption_layer)
             else:
-                # crop_ltrb[2] is right, so target_size[0] - crop_ltrb[2] is left in flipped image
-                crop_left_top = (target_size[0] - crop_ltrb[2], crop_ltrb[1])
-
-            original_sizes_hw.append((int(original_size[1]), int(original_size[0])))
-            crop_top_lefts.append((int(crop_left_top[1]), int(crop_left_top[0])))
-            target_sizes_hw.append((int(target_size[1]), int(target_size[0])))
-            flippeds.append(flipped)
-
-            # captionとtext encoder outputを処理する
-            caption = image_info.caption  # default
-            if image_info.text_encoder_outputs1 is not None:
-                text_encoder_outputs1_list.append(image_info.text_encoder_outputs1)
-                text_encoder_outputs2_list.append(image_info.text_encoder_outputs2)
-                text_encoder_pool2_list.append(image_info.text_encoder_pool2)
                 captions.append(caption)
-            elif image_info.text_encoder_outputs_npz is not None:
-                text_encoder_outputs1, text_encoder_outputs2, text_encoder_pool2 = load_text_encoder_outputs_from_disk(
-                    image_info.text_encoder_outputs_npz
-                )
-                text_encoder_outputs1_list.append(text_encoder_outputs1)
-                text_encoder_outputs2_list.append(text_encoder_outputs2)
-                text_encoder_pool2_list.append(text_encoder_pool2)
-                captions.append(caption)
-            else:
-                caption = self.process_caption(subset, image_info.caption)
+
+            if not self.token_padding_disabled:  # this option might be omitted in future
                 if self.XTI_layers:
-                    caption_layer = []
-                    for layer in self.XTI_layers:
-                        token_strings_from = " ".join(self.token_strings)
-                        token_strings_to = " ".join([f"{x}_{layer}" for x in self.token_strings])
-                        caption_ = caption.replace(token_strings_from, token_strings_to)
-                        caption_layer.append(caption_)
-                    captions.append(caption_layer)
+                    token_caption = self.get_input_ids(caption_layer, self.tokenizers[0])
                 else:
-                    captions.append(caption)
+                    token_caption = self.get_input_ids(caption, self.tokenizers[0])
+                input_ids_list.append(token_caption)
 
-                if not self.token_padding_disabled:  # this option might be omitted in future
+                if len(self.tokenizers) > 1:
                     if self.XTI_layers:
-                        token_caption = self.get_input_ids(caption_layer, self.tokenizers[0])
+                        token_caption2 = self.get_input_ids(caption_layer, self.tokenizers[1])
                     else:
-                        token_caption = self.get_input_ids(caption, self.tokenizers[0])
-                    input_ids_list.append(token_caption)
-
-                    if len(self.tokenizers) > 1:
-                        if self.XTI_layers:
-                            token_caption2 = self.get_input_ids(caption_layer, self.tokenizers[1])
-                        else:
-                            token_caption2 = self.get_input_ids(caption, self.tokenizers[1])
-                        input_ids2_list.append(token_caption2)
+                        token_caption2 = self.get_input_ids(caption, self.tokenizers[1])
+                    input_ids2_list.append(token_caption2)
 
         example = {}
         example["loss_weights"] = torch.FloatTensor(loss_weights)
