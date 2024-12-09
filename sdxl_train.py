@@ -131,19 +131,19 @@ def train(args, train_dataloader):
     tokenizer1, tokenizer2 = sdxl_train_util.load_tokenizers(args)
 
     # Prepare the dataset
-    if args.dataset_class is None:
-        blueprint_generator = BlueprintGenerator(ConfigSanitizer(True, True, args.masked_loss, True))
-        if args.dataset_config is not None:
-            logger.info(f"Load dataset config from {args.dataset_config}")
-            user_config = config_util.load_user_config(args.dataset_config)
-            ignored = ["train_data_dir", "in_json"]
-            if any(getattr(args, attr) is not None for attr in ignored):
-                logger.warning(
-                    "ignore following options because config file is found: {0} / 設定ファイルが利用されるため以下のオプションは無視されます: {0}".format(
-                        ", ".join(ignored)
-                    )
+    if args.dataset_config is not None: #Check this FIRST
+        logger.info(f"Load dataset config from {args.dataset_config}")
+        user_config = config_util.load_user_config(args.dataset_config)
+        ignored = ["train_data_dir", "in_json"]
+        if any(getattr(args, attr) is not None for attr in ignored):
+            logger.warning(
+                "ignore following options because config file is found: {0} / 設定ファイルが利用されるため以下のオプションは無視されます: {0}".format(
+                    ", ".join(ignored)
                 )
-        else:
+            )
+    elif args.dataset_class is not None: #Check for custom datasets only if dataset_config is None.
+        train_dataset_group = train_util.load_arbitrary_dataset(args, [tokenizer1, tokenizer2])
+    else: #no dataset_config or dataset_class
             if use_dreambooth_method:
                 logger.info("Using DreamBooth method.")
                 user_config = {
@@ -155,7 +155,7 @@ def train(args, train_dataloader):
                         }
                     ]
                 }
-            else:
+            else: #Training with captions
                 logger.info("Training with captions.")
                 user_config = {
                     "datasets": [
@@ -169,10 +169,10 @@ def train(args, train_dataloader):
                         }
                     ]
                 }
-
-        
-        blueprint = blueprint_generator.generate(user_config, args, tokenizer=[tokenizer1, tokenizer2])
-        train_dataset_group = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
+    #After the conditional block:
+    if args.dataset_class is None: #Only generate the blueprint if NOT using a custom dataset class
+            blueprint = blueprint_generator.generate(user_config, args, tokenizer=[tokenizer1, tokenizer2])
+            train_dataset_group = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
     else:
         train_dataset_group = train_util.load_arbitrary_dataset(args, [tokenizer1, tokenizer2])
 
