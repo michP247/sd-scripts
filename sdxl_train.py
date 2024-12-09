@@ -524,6 +524,10 @@ def train(args, train_dataloader=None):
         for m in training_models:
             m.train()
 
+        logger.info(f"Number of images in training dataset: {len(train_dataset_group)}")
+        if not train_dataset_group:
+            logger.error("Training dataset is empty. Please check your dataset configuration.")
+            return
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
 
