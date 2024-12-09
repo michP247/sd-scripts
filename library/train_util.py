@@ -4309,7 +4309,6 @@ def prepare_accelerator(args: argparse.Namespace, device=None):
         accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, mixed_precision=args.mixed_precision, cpu=args.use_cpu, device_placement=False)  # device_placement=False is essential for TPU
 
     #print("accelerator device:", accelerator.device)
-    print("RETURNING ACCELERATOR")
     return accelerator
 
 
