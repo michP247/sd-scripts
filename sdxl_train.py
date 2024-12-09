@@ -943,6 +943,7 @@ def setup_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timestep_sampling", type=str, default="sigmoid")
     #parser.add_argument("--use_tpu", action='store_true', default=False)
     parser.add_argument("--weighting_scheme", type=str, default="logit_normal")
+    parser.add_argument("--network_multiplier", type=float, default=1.0)
 
     return parser
 
