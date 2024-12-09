@@ -401,7 +401,6 @@ def train(args):
         )
         
         # Create DataLoader with distributed sampler
-        print(f"Dataset length: {len(train_dataset_group)}")
         train_dataloader = torch.utils.data.DataLoader(
             train_dataset_group,
             batch_size=batch_size,
@@ -513,7 +512,7 @@ def train(args):
     train_util.resume_from_local_or_hf_if_specified(accelerator, args)
 
     # Calculate the number of Epoch
-    print(f"dataloader length:{len(train_dataloader)}, gradient acc steps: {args.gradient_accumulation_steps}")
+    print(f"dataloader length:{len(train_dataloader)}, max train steps: {args.max_train_steps}, gradient acc steps: {args.gradient_accumulation_steps}")
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
     if (args.save_n_epoch_ratio is not None) and (args.save_n_epoch_ratio > 0):
