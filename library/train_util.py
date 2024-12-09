@@ -603,6 +603,17 @@ class BaseDataset(torch.utils.data.Dataset):
         self.tokenizers = tokenizer if isinstance(tokenizer, list) else [tokenizer]
 
         self.max_token_length = max_token_length
+        # Handle resolution formats correctly
+        if isinstance(resolution, str):
+            resolution = tuple(map(int, resolution.split(',')))
+        elif isinstance(resolution, int): #Single integer value
+            resolution = (resolution, resolution)
+        elif isinstance(resolution, list): #List in config file
+            resolution = tuple(resolution)
+        elif resolution is None:
+          pass
+        else: #Tuple
+          assert len(resolution) == 2
         # width/height is used when enable_bucket==False
         self.width, self.height = (None, None) if resolution is None else resolution
         self.network_multiplier = network_multiplier
