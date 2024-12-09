@@ -842,8 +842,19 @@ class BaseDataset(torch.utils.data.Dataset):
         return input_ids
 
     def register_image(self, info: ImageInfo, subset: BaseSubset):
+
+        if self.bucket_manager is None:
+            logger.warning("self.bucket_manager is None in register_image. Please make sure to call super().register_image after initializing self.bucket_manager, and that _length has been initialized somehow before calling __len__")
+
         self.image_data[info.image_key] = info
         self.image_to_subset[info.image_key] = subset
+
+        # Initialize _length if bucket_manager has been initialized. Subclasses can call this method directly.
+        if hasattr(self, "_length"):
+            return
+        self._length = 0
+        for image_info in self.image_data.values():
+            self._length += image_info.num_repeats * len(self.bucket_manager)
 
     def make_buckets(self):
         """
@@ -1602,6 +1613,7 @@ class DreamBoothDataset(BaseDataset):
                 info = ImageInfo(img_path, subset.num_repeats, caption, subset.is_reg, img_path)
                 if size is not None:
                     info.image_size = size
+                super().register_image(info, subset) #Call superclass method to correctly register images with initialized bucket manager, which initializes _length.
                 if subset.is_reg:
                     reg_infos.append((info, subset))
                 else:
@@ -1660,6 +1672,13 @@ class FineTuningDataset(BaseDataset):
 
         self.num_train_images = 0
         self.num_reg_images = 0
+        self.bucket_manager = BucketManager(False, (self.width, self.height), None, None, None)  #All of these parameters are set elsewhere, defaults given here.
+        self.bucket_manager.set_predefined_resos([(self.width, self.height)])  # Only one fixed size Bucket, since these datasets do not use bucketing.
+        
+        for image_info in self.image_data.values():
+            super().register_image(image_info, self.subsets[0]) #Call superclass method
+            image_width, image_height = image_info.image_size
+            image_info.bucket_reso, image_info.resized_size, _ = self.bucket_manager.select_bucket(image_width, image_height)
 
         for subset in subsets:
             if subset.num_repeats < 1:
