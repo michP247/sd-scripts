@@ -396,8 +396,9 @@ def train(args, train_dataloader=None):
         accelerator.print(
             f"override steps. steps for {args.max_train_epochs} epochs is: {args.max_train_steps}"
         )
-    print(f"1Number of images in dataset: {train_dataset_group.num_train_images}")
-    print(f"1Number of batches: {len(train_dataloader)}")
+    print(f"Number of images in dataset: {train_dataset_group.num_train_images}")
+    print(f"Number of batches: {len(train_dataloader)}")
+    print(f"Dataset class: {args.dataset_class if args.dataset_class else 'default'}")
     
     # Send training steps to the dataset side as well
     train_dataset_group.set_max_train_steps(args.max_train_steps)
@@ -472,8 +473,6 @@ def train(args, train_dataloader=None):
     train_util.resume_from_local_or_hf_if_specified(accelerator, args)
 
     # Calculate the number of Epoch
-    print(f"2Number of images in dataset: {train_dataset_group.num_train_images}")
-    print(f"2Number of batches: {len(train_dataloader)}")
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     try:
         num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
