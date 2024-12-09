@@ -827,6 +827,10 @@ class SdxlUNet2DConditionModel(nn.Module):
     ):
         super().__init__()
 
+        print(f"self.time_embed device: {self.time_embed.device}")  # This might raise an error if it's a Sequential
+        for name, param in self.time_embed.named_parameters():
+            print(f"  self.time_embed.{name} device: {param.device}")
+
         self.in_channels = IN_CHANNELS
         self.out_channels = OUT_CHANNELS
         self.model_channels = MODEL_CHANNELS
