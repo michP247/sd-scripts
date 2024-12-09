@@ -100,7 +100,7 @@ def append_block_lr_to_logs(block_lrs, logs, lr_scheduler, optimizer_type):
     train_util.append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names)
 
 
-def train(args):
+def train(args, train_dataloader):
     train_util.verify_training_args(args)
     train_util.prepare_dataset_args(args, True)
     sdxl_train_util.verify_sdxl_training_args(args)
