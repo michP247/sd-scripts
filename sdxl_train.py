@@ -549,9 +549,6 @@ def train(args, train_dataloader=None):
                             latents = torch.nan_to_num(latents, 0, out=latents)
                 latents = latents * sdxl_model_util.VAE_SCALE_FACTOR
 
-                # Ensure timesteps are on the accelerator device
-                timesteps = timesteps.to(accelerator.device)
-
                 if "text_encoder_outputs1_list" not in batch or batch["text_encoder_outputs1_list"] is None:
                     input_ids1 = batch["input_ids"]
                     input_ids2 = batch["input_ids2"]
@@ -617,7 +614,8 @@ def train(args, train_dataloader=None):
                 # Sample noise, sample a random timestep for each image, and add noise to the latents,
                 # with noise offset and/or multires noise if specified
                 noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents)
-
+                # Ensure timesteps are on the accelerator device
+                timesteps = timesteps.to(accelerator.device)
                 noisy_latents = noisy_latents.to(weight_dtype)  # TODO check why noisy_latents is not weight_dtype
 
                 # Predict the noise residual
