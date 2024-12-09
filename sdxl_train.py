@@ -614,8 +614,7 @@ def train(args, train_dataloader=None):
                 # Sample noise, sample a random timestep for each image, and add noise to the latents,
                 # with noise offset and/or multires noise if specified
                 noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents)
-                # Ensure timesteps are on the accelerator device
-                timesteps = timesteps.to(accelerator.device)
+                
                 noisy_latents = noisy_latents.to(weight_dtype)  # TODO check why noisy_latents is not weight_dtype
 
                 # Predict the noise residual
@@ -685,6 +684,9 @@ def train(args, train_dataloader=None):
                         optimizer.step()
                         lr_scheduler.step()
                         optimizer.zero_grad(set_to_none=True)
+                        
+                # Ensure timesteps are on the accelerator device
+                timesteps = timesteps.to(accelerator.device)
 
             # TPU-specific logging and synchronization
             if getattr(args, 'use_tpu', False):
