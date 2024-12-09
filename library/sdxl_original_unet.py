@@ -827,9 +827,6 @@ class SdxlUNet2DConditionModel(nn.Module):
     ):
         super().__init__()
 
-        print(f"self.time_embed device: {self.time_embed.device}")  # This might raise an error if it's a Sequential
-        for name, param in self.time_embed.named_parameters():
-            print(f"  self.time_embed.{name} device: {param.device}")
 
         self.in_channels = IN_CHANNELS
         self.out_channels = OUT_CHANNELS
@@ -839,14 +836,14 @@ class SdxlUNet2DConditionModel(nn.Module):
 
         self.gradient_checkpointing = False
         # self.sample_size = sample_size
-
+        
         # time embedding
         self.time_embed = nn.Sequential(
             nn.Linear(self.model_channels, self.time_embed_dim),
             nn.SiLU(),
             nn.Linear(self.time_embed_dim, self.time_embed_dim),
         )
-
+        print(f"time_embed device: {self.time_embed.device}")
         # label embedding
         self.label_emb = nn.Sequential(
             nn.Sequential(
@@ -855,7 +852,7 @@ class SdxlUNet2DConditionModel(nn.Module):
                 nn.Linear(self.time_embed_dim, self.time_embed_dim),
             )
         )
-
+        print(f"label_emb device: {self.label_emb.device}")
         # input
         self.input_blocks = nn.ModuleList(
             [
