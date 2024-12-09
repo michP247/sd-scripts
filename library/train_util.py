@@ -2049,7 +2049,6 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
         self.datasets: List[Union[DreamBoothDataset, FineTuningDataset]]
 
         super().__init__(datasets)
-
         self.image_data = {}
         self.num_train_images = 0
         self.num_reg_images = 0
@@ -2058,6 +2057,7 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
         # TODO: handling image_data key duplication among dataset
         #   In practical, this is not the big issue because image_data is accessed from outside of dataset only for debug_dataset.
         for dataset in datasets:
+            dataset.make_buckets()
             self.image_data.update(dataset.image_data)
             self.num_train_images += dataset.num_train_images
             self.num_reg_images += dataset.num_reg_images
