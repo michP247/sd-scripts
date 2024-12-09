@@ -2300,6 +2300,7 @@ def glob_images_pathlib(dir_path, recursive):
             image_paths += list(dir_path.glob("*" + ext))
     image_paths = list(set(image_paths))  # 重複を排除
     image_paths.sort()
+    print(f"glob_images_pathlib: {image_paths}")
     return image_paths
 
 

@@ -374,7 +374,7 @@ def train(args, train_dataloader=None):
 
     if train_dataloader is None: #If no train_dataloader is passed in.
         # Prepare Dataloader
-        # Number of DataLoader processes: Note that 0 means persistent_workers cannot be used.
+        print(f"train_data_dir: {args.train_data_dir}, metadata: {args.in_json}")
         n_workers = min(args.max_data_loader_n_workers, os.cpu_count())  # cpu_count or max_data_loader_n_workers
         train_dataloader = torch.utils.data.DataLoader(
             train_dataset_group,
@@ -384,6 +384,9 @@ def train(args, train_dataloader=None):
             num_workers=n_workers,
             persistent_workers=args.persistent_data_loader_workers and n_workers > 0,
         )
+        # Check if the dataloader is empty after it has been created
+        if len(train_dataloader) == 0:
+            raise ValueError("The training data loader is empty. Please check your dataset and configuration.")
     
     # Calculate the number of training steps
     if args.max_train_epochs is not None:
@@ -467,9 +470,11 @@ def train(args, train_dataloader=None):
     train_util.resume_from_local_or_hf_if_specified(accelerator, args)
 
     # Calculate the number of Epoch
-    print(f"dataloader length:{len(train_dataloader)}, max train steps: {args.max_train_steps}, gradient acc steps: {args.gradient_accumulation_steps}")
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
-    num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    try:
+        num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    except ZeroDivisionError:
+        raise ValueError("Number of update steps per epoch is zero. Please ensure that your dataloader is not empty.")
     if (args.save_n_epoch_ratio is not None) and (args.save_n_epoch_ratio > 0):
         args.save_every_n_epochs = math.floor(num_train_epochs / args.save_n_epoch_ratio) or 1
 
