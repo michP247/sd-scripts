@@ -608,7 +608,8 @@ def train(args, train_dataloader=None):
                 embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
 
                 # concat embeddings
-                vector_embedding = torch.cat([pool2, embs], dim=1).to(weight_dtype)
+                vector_embedding = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
+                vector_embedding = vector_embedding.to(accelerator.device)  # Move to TPU
                 text_embedding = torch.cat([encoder_hidden_states1, encoder_hidden_states2], dim=2).to(weight_dtype)
 
                 # Sample noise, sample a random timestep for each image, and add noise to the latents,
