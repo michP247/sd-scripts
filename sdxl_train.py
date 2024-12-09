@@ -548,30 +548,38 @@ def train(args, train_dataloader=None):
 
             
             with accelerator.accumulate(*training_models):
-                if "latents" in batch and batch["latents"] is not None:
-                    latents = batch["latents"].to(accelerator.device).to(dtype=weight_dtype)
-                else:
-                    with torch.no_grad():
-                        # latentに変換
-                        latents = vae.encode(batch["images"].to(vae_dtype)).latent_dist.sample().to(weight_dtype)
+                if not getattr(args, 'use_tpu', False): #Original non-TPU codepath.
+                    if "latents" in batch and batch["latents"] is not None:
+                        latents = batch["latents"].to(accelerator.device).to(dtype=weight_dtype)
+                    else:
+                        with torch.no_grad():
+                            # latentに変換
+                            latents = vae.encode(batch["images"].to(vae_dtype)).latent_dist.sample().to(weight_dtype)
 
-                        # NaNが含まれていれば警告を表示し0に置き換える
-                        if torch.any(torch.isnan(latents)):
-                            accelerator.print("NaN found in latents, replacing with zeros")
-                            latents = torch.nan_to_num(latents, 0, out=latents)
-                latents = latents * sdxl_model_util.VAE_SCALE_FACTOR
+                            # NaNが含まれていれば警告を表示し0に置き換える
+                            if torch.any(torch.isnan(latents)):
+                                accelerator.print("NaN found in latents, replacing with zeros")
+                                latents = torch.nan_to_num(latents, 0, out=latents)
+                    latents = latents * sdxl_model_util.VAE_SCALE_FACTOR
 
-                #Move all inputs to the device BEFORE doing anything else.
-                if not getattr(args, 'use_tpu', False):
+                    #Move all inputs to the device BEFORE doing anything else.
                     input_ids1 = batch["input_ids"].to(accelerator.device)
                     input_ids2 = batch["input_ids2"].to(accelerator.device)
-                else:
+
+                    orig_size = batch["original_sizes_hw"].to(accelerator.device)
+                    crop_size = batch["crop_top_lefts"].to(accelerator.device)
+                    target_size = batch["target_sizes_hw"].to(accelerator.device)
+                else: #TPU Codepath: Transfer tensors within the TPU context.
                     input_ids1 = batch["input_ids"]
                     input_ids2 = batch["input_ids2"]
+                
+                    atents = xm.xla_device()(lambda: batch["latents"].to(dtype=weight_dtype))() if "latents" in batch and batch["latents"] is not None else xm.xla_device()(lambda: vae.encode(batch["images"].to(vae_dtype)).latent_dist.sample().to(weight_dtype))()
+                    # Place directly on device as it is created and perform multiplication.
+                    latents = latents * sdxl_model_util.VAE_SCALE_FACTOR #Multiplication must also be inside the TPU context.
 
-                orig_size = batch["original_sizes_hw"].to(accelerator.device)
-                crop_size = batch["crop_top_lefts"].to(accelerator.device)
-                target_size = batch["target_sizes_hw"].to(accelerator.device)
+                    orig_size = batch["original_sizes_hw"]
+                    crop_size = batch["crop_top_lefts"]
+                    target_size = batch["target_sizes_hw"]
 
                 if "text_encoder_outputs1_list" not in batch or batch["text_encoder_outputs1_list"] is None:
                     input_ids1 = batch["input_ids"]
@@ -625,6 +633,13 @@ def train(args, train_dataloader=None):
                     # assert ((pool2.to("cpu") - p2.to(dtype=weight_dtype)).abs().max() > 1e-2).sum() <= b_size * 2
                     # logger.info("text encoder outputs verified")
 
+                if getattr(args, 'use_tpu', False):
+                  embs = xm.xla_device()(lambda: sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype))()
+                  vector_embedding = xm.xla_device()(lambda: sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype))()
+                else:
+                  embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
+                  vector_embedding = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
+
                 # Get size embeddings *after* moving input tensors to device
                 orig_size = batch["original_sizes_hw"].to(accelerator.device)
                 crop_size = batch["crop_top_lefts"].to(accelerator.device)
@@ -637,19 +652,16 @@ def train(args, train_dataloader=None):
                 #Place text_embedding on the correct device.
                 text_embedding.to(accelerator.device)
 
-                # Sample noise and add to latents *after* device placement
                 noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents)
-                
-                # Ensure noisy_latents and timesteps are on the accelerator device before they are passed to U-Net
-                noisy_latents = noisy_latents.to(accelerator.device, dtype=weight_dtype) #Move type conversion and to.device into a single line.
+                if getattr(args, 'use_tpu', False):
+                    noisy_latents = noisy_latents.to(accelerator.device, dtype=weight_dtype)
+                    timesteps = timesteps.to(accelerator.device)
 
-                timesteps = timesteps.to(accelerator.device) #Move timesteps after they have been created, to prevent type errors in timestep_embedding
+                    with accelerator.autocast(): #Keep unet inside the TPU context to prevent errors.
+                        noise_pred = unet(noisy_latents, timesteps, text_embedding.to(accelerator.device), vector_embedding)
 
-                # Predict the noise residual
-                with accelerator.autocast():
-                    noise_pred = unet(noisy_latents, timesteps, text_embedding.to(accelerator.device), vector_embedding) #Ensure text_embedding and vector_embedding are on device.
-
-                target = noise
+                    target = noise.to(accelerator.device) #target noise needs to be placed onto the device.
+                    loss = train_util.conditional_loss(noise_pred.float(), target.float(), reduction="none", loss_type=args.loss_type, huber_c=huber_c) #Loss calculation also needs to be on-device, to keep operations within the XLA graph
 
                 if (
                     args.min_snr_gamma
