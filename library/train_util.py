@@ -185,6 +185,9 @@ class BucketManager:
         self.reso_to_id = {}
         self.buckets = []  # 前処理時は (image_key, image, original size, crop left/top)、学習時は image_key
 
+    def __len__(self):
+        return len(self.buckets) #Number of buckets
+
     def add_image(self, reso, image_or_info):
         bucket_id = self.reso_to_id[reso]
         self.buckets[bucket_id].append(image_or_info)
@@ -849,12 +852,10 @@ class BaseDataset(torch.utils.data.Dataset):
         self.image_data[info.image_key] = info
         self.image_to_subset[info.image_key] = subset
 
-        # Initialize _length if bucket_manager has been initialized. Subclasses can call this method directly.
-        if hasattr(self, "_length"):
-            return
-        self._length = 0
-        for image_info in self.image_data.values():
-            self._length += image_info.num_repeats * len(self.bucket_manager)
+        if not hasattr(self, "_length") and self.bucket_manager is not None: #Only initialize if _length not initialized and bucket_manager has been initialized.
+            self._length = 0
+            for image_info in self.image_data.values():
+                self._length += image_info.num_repeats * len(self.bucket_manager.buckets) #Multiply by number of buckets for dataset
 
     def make_buckets(self):
         """
