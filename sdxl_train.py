@@ -350,11 +350,20 @@ def train(args, train_dataloader=None):
     training_models = []
     params_to_optimize = []
     if train_unet:
-        training_models.append(unet)
-        if block_lrs is None:
-            params_to_optimize.append({"params": list(unet.parameters()), "lr": args.learning_rate})
+      logger.info("Converting SdxlUNet2DConditionModel to TPU...")
+      new_unet_dict = {}
+      for key, item in accelerator.unwrap_model(unet).state_dict().items():
+        if getattr(args, 'use_tpu', False):
+          new_unet_dict[key] = item.to(xm.xla_device())
         else:
-            params_to_optimize.extend(get_block_params_to_optimize(unet, block_lrs))
+          new_unet_dict[key] = item.to(accelerator.device) #Keep original codepath for other devices.
+      accelerator.unwrap_model(unet).load_state_dict(new_unet_dict)
+      logger.info("Converted Successfully to TPU.")
+
+      if block_lrs is None:
+          params_to_optimize.append({"params": list(unet.parameters()), "lr": args.learning_rate})
+      else:
+          params_to_optimize.extend(get_block_params_to_optimize(unet, block_lrs))
 
     if train_text_encoder1:
         training_models.append(text_encoder1)
