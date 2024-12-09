@@ -1078,6 +1078,7 @@ class SdxlUNet2DConditionModel(nn.Module):
         hs = []
         t_emb = get_timestep_embedding(timesteps, self.model_channels, downscale_freq_shift=0)  # , repeat_only=False)
         t_emb = t_emb.to(x.dtype)
+        print(f"t_emb device: {t_emb.device}")
         emb = self.time_embed(t_emb)
 
         assert x.shape[0] == y.shape[0], f"batch size mismatch: {x.shape[0]} != {y.shape[0]}"
