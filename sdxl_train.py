@@ -176,6 +176,9 @@ def train(args, train_dataloader=None):
             train_dataset_group = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
     else:
         train_dataset_group = train_util.load_arbitrary_dataset(args, [tokenizer1, tokenizer2])
+    
+    print(f"Number of images in dataset: {train_dataset_group.num_train_images}")
+    print(f"Number of batches: {len(train_dataloader)}")
 
     current_epoch = Value("i", 0)
     current_step = Value("i", 0)
