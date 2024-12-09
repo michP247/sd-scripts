@@ -101,6 +101,7 @@ def append_block_lr_to_logs(block_lrs, logs, lr_scheduler, optimizer_type):
 
 
 def train(args, train_dataloader=None):
+    print("Starting training...")
     train_util.verify_training_args(args)
     train_util.prepare_dataset_args(args, True)
     sdxl_train_util.verify_sdxl_training_args(args)
@@ -134,6 +135,13 @@ def train(args, train_dataloader=None):
     if args.dataset_config is not None: #Check this FIRST
         logger.info(f"Load dataset config from {args.dataset_config}")
         user_config = config_util.load_user_config(args.dataset_config)
+        # Additional logging to ensure correct loading
+        print(f"Using dataset config: {user_config}")
+    elif args.dataset_class is not None: # Check for custom datasets only if dataset_config is None.
+        print("Loading arbitrary dataset class...")
+        train_dataset_group = train_util.load_arbitrary_dataset(args, [tokenizer1, tokenizer2])
+    else: 
+        print("No dataset configuration or class provided. Using default training method.")
         ignored = ["train_data_dir", "in_json"]
         if any(getattr(args, attr) is not None for attr in ignored):
             logger.warning(
@@ -141,7 +149,7 @@ def train(args, train_dataloader=None):
                     ", ".join(ignored)
                 )
             )
-    elif args.dataset_class is not None: #Check for custom datasets only if dataset_config is None.
+    if args.dataset_class is not None: #Check for custom datasets only if dataset_config is None.
         train_dataset_group = train_util.load_arbitrary_dataset(args, [tokenizer1, tokenizer2])
     else: #no dataset_config or dataset_class
             if use_dreambooth_method:
