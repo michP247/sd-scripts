@@ -2554,6 +2554,51 @@ EPSILON = 1e-6
 
 # helper functions
 
+def collate_fn(examples):
+    #If examples is empty (should no longer occur with the changes to __getitem__ we made).
+    if not examples:
+        return {}
+    
+    example = examples[0] #Access the first dictionary from the __getitem__ list.
+    # If examples is not a list, then it will raise a TypeError, meaning that __getitem__ is returning a type it isn't meant to.
+    if type(examples) == list and type(examples[0]) != dict:
+        raise TypeError(f"Batch from dataset's __getitem__ must be a list of dicts. Found list of {type(examples[0])} instead.")
+
+    # Collate each element in the example dictionary
+    collated_example = {}
+    for key in example:
+        if example[key] is None:
+            collated_example[key] = None
+            continue
+        
+        if isinstance(example[key], list) and isinstance(example[key][0], torch.Tensor) and key != "captions":  # Stack tensors in key except captions
+            try:
+                collated_example[key] = torch.stack(example[key], dim=0)
+            except RuntimeError as e: # Handle collation errors and provide more informative error messages
+                print(f"Error stacking tensors for key: {key}. Ensure tensors have compatible shapes.")
+                print(f"Sizes of tensors in list: {[t.shape for t in example[key]]}")
+                raise
+        elif isinstance(example[key], list):  # Keep lists as is
+            collated_example[key] = example[key]
+        elif isinstance(example[key], torch.Tensor):
+             collated_example[key] = example[key]
+
+        elif isinstance(example[key], (int, float, str, bool)):
+            collated_example[key] = example[key] #These datatypes are batch-agnostic. Do nothing, and use the example value for batch.
+
+        # Special case for strings, extend existing list
+        elif key == "captions" and isinstance(example[key], list):
+            collated_example[key] = example[key][0]
+        # Special handling for "captions" which are lists of strings.
+        elif key == "captions":
+             collated_example[key] = example[key]
+        # Add other specific cases as needed
+
+        else:
+            raise TypeError(f"Unsupported data type in dataset: {type(example[key])} for key: {key}")
+
+    return collated_example
+
 
 def exists(val):
     return val is not None
