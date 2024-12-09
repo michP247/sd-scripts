@@ -514,6 +514,7 @@ def train(args, train_dataloader=None):
     )
 
     loss_recorder = train_util.LossRecorder()
+
     for epoch in range(num_train_epochs):
         accelerator.print(f"\nepoch {epoch+1}/{num_train_epochs}")
         current_epoch.value = epoch + 1
@@ -522,9 +523,11 @@ def train(args, train_dataloader=None):
             m.train()
 
         logger.info(f"Number of images in training dataset: {len(train_dataset_group)}")
+
         if not train_dataset_group:
             logger.error("Training dataset is empty. Please check your dataset configuration.")
             return
+        
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
 
@@ -548,6 +551,18 @@ def train(args, train_dataloader=None):
                             accelerator.print("NaN found in latents, replacing with zeros")
                             latents = torch.nan_to_num(latents, 0, out=latents)
                 latents = latents * sdxl_model_util.VAE_SCALE_FACTOR
+
+                #Move all inputs to the device BEFORE doing anything else.
+                if not getattr(args, 'use_tpu', False):
+                    input_ids1 = batch["input_ids"].to(accelerator.device)
+                    input_ids2 = batch["input_ids2"].to(accelerator.device)
+                else:
+                    input_ids1 = batch["input_ids"]
+                    input_ids2 = batch["input_ids2"]
+
+                orig_size = batch["original_sizes_hw"].to(accelerator.device)
+                crop_size = batch["crop_top_lefts"].to(accelerator.device)
+                target_size = batch["target_sizes_hw"].to(accelerator.device)
 
                 if "text_encoder_outputs1_list" not in batch or batch["text_encoder_outputs1_list"] is None:
                     input_ids1 = batch["input_ids"]
@@ -601,25 +616,29 @@ def train(args, train_dataloader=None):
                     # assert ((pool2.to("cpu") - p2.to(dtype=weight_dtype)).abs().max() > 1e-2).sum() <= b_size * 2
                     # logger.info("text encoder outputs verified")
 
-                # get size embeddings, ensure inputs are on device *before* passing to functions
+                # Get size embeddings *after* moving input tensors to device
                 orig_size = batch["original_sizes_hw"].to(accelerator.device)
                 crop_size = batch["crop_top_lefts"].to(accelerator.device)
                 target_size = batch["target_sizes_hw"].to(accelerator.device)
                 embs = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
-
-                # concat embeddings
                 vector_embedding = sdxl_train_util.get_size_embeddings(orig_size, crop_size, target_size, accelerator.device).to(weight_dtype)
-                text_embedding = torch.cat([encoder_hidden_states1, encoder_hidden_states2], dim=2).to(weight_dtype)
 
-                # Sample noise, sample a random timestep for each image, and add noise to the latents,
-                # with noise offset and/or multires noise if specified
+                # Concatenate embeddings after they have been computed
+                text_embedding = torch.cat([encoder_hidden_states1, encoder_hidden_states2], dim=2).to(weight_dtype)
+                #Place text_embedding on the correct device.
+                text_embedding.to(accelerator.device)
+
+                # Sample noise and add to latents *after* device placement
                 noise, noisy_latents, timesteps, huber_c = train_util.get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents)
                 
-                noisy_latents = noisy_latents.to(weight_dtype)  # TODO check why noisy_latents is not weight_dtype
+                # Ensure noisy_latents and timesteps are on the accelerator device before they are passed to U-Net
+                noisy_latents = noisy_latents.to(accelerator.device, dtype=weight_dtype) #Move type conversion and to.device into a single line.
+
+                timesteps = timesteps.to(accelerator.device) #Move timesteps after they have been created, to prevent type errors in timestep_embedding
 
                 # Predict the noise residual
                 with accelerator.autocast():
-                    noise_pred = unet(noisy_latents, timesteps, text_embedding, vector_embedding)
+                    noise_pred = unet(noisy_latents, timesteps, text_embedding.to(accelerator.device), vector_embedding) #Ensure text_embedding and vector_embedding are on device.
 
                 target = noise
 
@@ -684,9 +703,6 @@ def train(args, train_dataloader=None):
                         optimizer.step()
                         lr_scheduler.step()
                         optimizer.zero_grad(set_to_none=True)
-                        
-                # Ensure timesteps are on the accelerator device
-                timesteps = timesteps.to(accelerator.device)
 
             # TPU-specific logging and synchronization
             if getattr(args, 'use_tpu', False):
