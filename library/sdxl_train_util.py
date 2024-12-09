@@ -177,41 +177,32 @@ def match_mixed_precision(args, weight_dtype):
 
 
 #Modify timestep_embedding function to ensure it is on the TPU
-def timestep_embedding(timesteps, dim, max_period=10000, device=None): #Add device parameter
-    """
-    Create sinusoidal timestep embeddings.
-
-    :param timesteps: a 1-D Tensor of N indices, one per batch element.
-                      These may be fractional.
-    :param dim: the dimension of the output.
-    :param max_period: controls the minimum frequency of the embeddings.
-    :return: an [N x dim] Tensor of positional embeddings.
-    """
+def timestep_embedding(timesteps, dim, max_period=10000, device=None):
     half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(device=timesteps.device) #Place on TPU
+    # Correct device placement, pass device to .to() only
+    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(device) 
     args = timesteps[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
     if dim % 2:
         embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
-    return embedding.to(device) #Return tensor on device.
+    return embedding.to(device)
 
 
-def get_timestep_embedding(x, outdim, device): #Add device parameter
+def get_timestep_embedding(x, outdim, device):
     assert len(x.shape) == 2
     b, dims = x.shape[0], x.shape[1]
     x = torch.flatten(x)
-    emb = timestep_embedding(x, outdim, device) #Call modified timestep_embedding which transfers tensor.
+    emb = timestep_embedding(x, outdim, device=device) # Pass device keyword argument
     emb = torch.reshape(emb, (b, dims * outdim))
     return emb
 
 
 def get_size_embeddings(orig_size, crop_size, target_size, device):
-    emb1 = get_timestep_embedding(orig_size.to(device), 256, device) #Place orig_size on device.
-    emb2 = get_timestep_embedding(crop_size.to(device), 256, device)  #Place crop_size on device.
-    emb3 = get_timestep_embedding(target_size.to(device), 256, device)  #Place target_size on device.
-
+    emb1 = get_timestep_embedding(orig_size.to(device), 256, device)
+    emb2 = get_timestep_embedding(crop_size.to(device), 256, device)
+    emb3 = get_timestep_embedding(target_size.to(device), 256, device)
     vector = torch.cat([emb1, emb2, emb3], dim=1)
-    return vector.to(device) #Return to correct device.
+    return vector.to(device)
 
 
 def save_sd_model_on_train_end(
