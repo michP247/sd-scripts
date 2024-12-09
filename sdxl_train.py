@@ -548,7 +548,21 @@ def train(args, train_dataloader=None):
 
             
             with accelerator.accumulate(*training_models):
-                if not getattr(args, 'use_tpu', False): #Original non-TPU codepath.
+                if getattr(args, 'use_tpu', False):
+                    # TPU Codepath: Transfer tensors within the TPU context.
+                    input_ids1 = batch["input_ids"].to(device) #Moved outside with other tensors.
+                    input_ids2 = batch["input_ids2"].to(device)
+                
+                    if "latents" in batch and batch["latents"] is not None:
+                        latents = batch["latents"].to(device, dtype=weight_dtype)
+                    else:
+                        latents = vae.encode(batch["images"].to(device, dtype=vae_dtype)).latent_dist.sample().to(device, dtype=weight_dtype)
+                    latents = latents * sdxl_model_util.VAE_SCALE_FACTOR
+
+                    orig_size = batch["original_sizes_hw"].to(device)
+                    crop_size = batch["crop_top_lefts"].to(device)
+                    target_size = batch["target_sizes_hw"].to(device)
+                else: #Original non-TPU codepath.
                     if "latents" in batch and batch["latents"] is not None:
                         latents = batch["latents"].to(accelerator.device).to(dtype=weight_dtype)
                     else:
@@ -569,17 +583,6 @@ def train(args, train_dataloader=None):
                     orig_size = batch["original_sizes_hw"].to(accelerator.device)
                     crop_size = batch["crop_top_lefts"].to(accelerator.device)
                     target_size = batch["target_sizes_hw"].to(accelerator.device)
-                else: #TPU Codepath: Transfer tensors within the TPU context.
-                    input_ids1 = batch["input_ids"]
-                    input_ids2 = batch["input_ids2"]
-                
-                    atents = xm.xla_device()(lambda: batch["latents"].to(dtype=weight_dtype))() if "latents" in batch and batch["latents"] is not None else xm.xla_device()(lambda: vae.encode(batch["images"].to(vae_dtype)).latent_dist.sample().to(weight_dtype))()
-                    # Place directly on device as it is created and perform multiplication.
-                    latents = latents * sdxl_model_util.VAE_SCALE_FACTOR #Multiplication must also be inside the TPU context.
-
-                    orig_size = batch["original_sizes_hw"]
-                    crop_size = batch["crop_top_lefts"]
-                    target_size = batch["target_sizes_hw"]
 
                 if "text_encoder_outputs1_list" not in batch or batch["text_encoder_outputs1_list"] is None:
                     input_ids1 = batch["input_ids"]
