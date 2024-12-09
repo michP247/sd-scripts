@@ -230,7 +230,12 @@ def train(args, train_dataloader=None):
         logit_scale,
         ckpt_info,
     ) = sdxl_train_util.load_target_model(args, accelerator, "sdxl", weight_dtype)
-    # logit_scale = logit_scale.to(accelerator.device, dtype=weight_dtype)
+    
+    # Add these lines here, after loading the unet:
+    if getattr(args, 'use_tpu', False):
+        unet.to(device)
+        unet.time_embed.to(device)
+        unet.label_emb.to(device)
 
     # verify load/save model formats
     if load_stable_diffusion_format:
