@@ -1673,25 +1673,14 @@ class FineTuningDataset(BaseDataset):
                     f"ignore duplicated subset with metadata_file='{subset.metadata_file}': use the first one"
                 )
                 continue
-            
-            if subset.metadata_file and os.path.exists(subset.metadata_file):
+
+            # Read metadata
+            if os.path.exists(subset.metadata_file):
                 logger.info(f"loading existing metadata: {subset.metadata_file}")
-
-
                 with open(subset.metadata_file, "rt", encoding="utf-8") as f:
                     metadata = json.load(f)
-                    img_mdf = {} #If there is a metadata file create dictionary using file name as key
-                    
-                    if isinstance(metadata, list):
-                        for img_data in metadata:
-                            print(f"JSON Entry: {img_md}") # Print the JSON entry
-                            key = os.path.splitext(os.path.basename(img_data['file_name']))[0] #Use file name as key (without extension)
-                            img_mdf[key] = img_data
-                    elif isinstance(metadata, dict): #Handle dictionary
-                        img_mdf = metadata
-                    
-                    else:
-                        raise ValueError("no metadata...")
+            else:
+                raise ValueError(f"no metadata: {subset.metadata_file}")
 
             if len(metadata) < 1:
                 logger.warning(
@@ -1700,48 +1689,30 @@ class FineTuningDataset(BaseDataset):
                 continue
 
             tags_list = []
-
-            loaded_image_count = 0  # Initialize counter here, outside inner loop
-            total_images_in_json = len(metadata)
-
-            for image_key, img_md in img_mdf.items(): # Iterate through your metadata
-                print(f"JSON Entry: {img_md}")
-                #Construct full absolute image path               
-                image_path = os.path.join(subset.image_dir, img_md["file_name"]) #Absolute path to the image file, for loading
+            #loaded_image_count = 0
+            for image_key, img_md in metadata.items():
+                # Create PATH information
                 abs_path = None
-                if os.path.exists(image_path):
-                    abs_path = image_path
-                else: #If full path doesn't exist, then build the file name from the image directory and the file from the JSON entry
-                    abs_path = os.path.join(subset.image_dir, img_md['file_name'])
 
-                    print(f"Attempting to load image from: {abs_path}")
-                    
+                # Search for images first and foremost.
+                if os.path.exists(image_key):
+                    abs_path = image_key
+                else:
+                    # I can't think of a better way to do it, although it's rather lax.
+                    paths = glob_images(subset.image_dir, image_key)
+                    if len(paths) > 0:
+                        abs_path = paths[0]
+
+                # If not, look for npz.
                 if abs_path is None:
-                    logger.warning(f"Image not found: {image_path}. Skipping.")
-                    continue
+                    if os.path.exists(os.path.splitext(image_key)[0] + ".npz"):
+                        abs_path = os.path.splitext(image_key)[0] + ".npz"
+                    else:
+                        npz_path = os.path.join(subset.image_dir, image_key + ".npz")
+                        if os.path.exists(npz_path):
+                            abs_path = npz_path
 
-                try:
-                    # ... (image loading, caption processing, etc.)
-                    loaded_image_count += 1 #Successfully loaded image, increment counter
-                except Exception as e:
-                    print(f"Error loading image: {abs_path}")
-                    print(e)
-                    # raise e # Optionally re-raise to stop execution on error
-
-                print(f"Loaded {loaded_image_count} images out of {total_images_in_json} in JSON.")
-                if loaded_image_count < total_images_in_json: # Sanity check, alert if not all images loaded.
-                    logger.warning(f"Not all images in the JSON were loaded, images may be missing from training data.")
-
-                if abs_path is None:  # Try with npz extension
-                    npz_path = os.path.splitext(image_path)[0] + ".npz"
-                    if os.path.exists(npz_path):
-                        abs_path = npz_path
-
-                if abs_path is None:  # Still not found, log a warning and skip the image.
-                    logger.warning(f"Image not found: {image_path} or {npz_path}. Skipping.") #This now prints out the absolute path it can't find
-                    continue #Skip the image
-
-                assert abs_path is not None, f"no image / 画像がありません: {image_key}"
+                assert abs_path is not None, f"no image: {image_key}"
 
                 caption = img_md.get("caption")
                 tags = img_md.get("tags")
@@ -1864,33 +1835,6 @@ class FineTuningDataset(BaseDataset):
         if not use_npz_latents:
             for image_info in self.image_data.values():
                 image_info.latents_npz = image_info.latents_npz_flipped = None
-
-    def image_key_to_npz_file(self, subset: FineTuningSubset, image_key):
-        base_name = os.path.splitext(image_key)[0]
-        npz_file_norm = base_name + ".npz"
-
-        if os.path.exists(npz_file_norm):
-            # image_key is full path
-            npz_file_flip = base_name + "_flip.npz"
-            if not os.path.exists(npz_file_flip):
-                npz_file_flip = None
-            return npz_file_norm, npz_file_flip
-
-        # if not full path, check image_dir. if image_dir is None, return None
-        if subset.image_dir is None:
-            return None, None
-
-        # image_key is relative path
-        npz_file_norm = os.path.join(subset.image_dir, image_key + ".npz")
-        npz_file_flip = os.path.join(subset.image_dir, image_key + "_flip.npz")
-
-        if not os.path.exists(npz_file_norm):
-            npz_file_norm = None
-            npz_file_flip = None
-        elif not os.path.exists(npz_file_flip):
-            npz_file_flip = None
-
-        return npz_file_norm, npz_file_flip
 
 
 class ControlNetDataset(BaseDataset):
