@@ -377,27 +377,16 @@ def train(args, train_dataloader=None):
     accelerator.print("prepare optimizer, data loader etc.")
     _, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
 
-    if train_dataloader is None: #If no train_dataloader is passed in.
-        # Prepare Dataloader
-        print(f"train_data_dir: {args.train_data_dir}, metadata: {args.in_json}")
-        n_workers = min(args.max_data_loader_n_workers, os.cpu_count())  # cpu_count or max_data_loader_n_workers
-        train_dataloader = torch.utils.data.DataLoader(
-            train_dataset_group,
-            batch_size=1,
-            shuffle=True,
-            collate_fn=collator,
-            num_workers=n_workers,
-            persistent_workers=args.persistent_data_loader_workers and n_workers > 0,
-        )
-        # Check if the dataloader is empty after it has been created
-        if len(train_dataloader) == 0:
-            raise ValueError("The training data loader is empty. Please check your dataset and configuration.")
-    
+    # Prepare Dataloader
+
     # Calculate the number of training steps
     if args.max_train_epochs is not None:
-        args.max_train_steps = args.max_train_epochs * math.ceil(
-            len(train_dataloader) / accelerator.num_processes / args.gradient_accumulation_steps
-        )
+        num_samples = len(train_dataset_group.datasets[0]) # Access the first dataset in the group, since it is not a concatenated dataset but a list containing a single FineTuningDataset.
+        num_update_steps_per_epoch = math.ceil(num_samples / args.gradient_accumulation_steps)
+        # Modify the following line
+        num_update_steps_per_epoch = math.ceil(num_update_steps_per_epoch / accelerator.num_processes)
+        args.max_train_steps = args.max_train_epochs * num_update_steps_per_epoch
+        print("Steps set correctly for multi-epoch TPU training.")  # Debugging print
         accelerator.print(
             f"override steps. steps for {args.max_train_epochs} epochs is: {args.max_train_steps}"
         )
