@@ -100,7 +100,7 @@ def append_block_lr_to_logs(block_lrs, logs, lr_scheduler, optimizer_type):
     train_util.append_lr_to_logs_with_names(logs, lr_scheduler, optimizer_type, names)
 
 
-def train(args, train_dataloader):
+def train(args, train_dataloader=None):
     train_util.verify_training_args(args)
     train_util.prepare_dataset_args(args, True)
     sdxl_train_util.verify_sdxl_training_args(args)
@@ -279,7 +279,8 @@ def train(args, train_dataloader):
         with torch.no_grad():
             train_dataset_group.cache_latents(vae, args.vae_batch_size, args.cache_latents_to_disk, accelerator.is_main_process)
         vae.to("cpu")
-        clean_memory_on_device(accelerator.device)
+        if not getattr(args, 'use_tpu', False): #Only clean memory if not TPU.
+            clean_memory_on_device(accelerator.device)
 
         accelerator.wait_for_everyone()
 
@@ -371,73 +372,26 @@ def train(args, train_dataloader):
     accelerator.print("prepare optimizer, data loader etc.")
     _, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
 
-    # Prepare Dataloader
-    # Number of DataLoader processes: Note that 0 means persistent_workers cannot be used.
-    n_workers = min(args.max_data_loader_n_workers, os.cpu_count())  # cpu_count or max_data_loader_n_workers
-    def prepare_tpu_dataloader(train_dataset_group, args):
-        """
-        Prepare a distributed dataloader for TPU training.
-        
-        Args:
-            train_dataset_group: Original dataset group.
-            args: Configuration arguments.
-        
-        Returns:
-            Distributed TPU-compatible DataLoader.
-        """
-        import torch
-        import torch_xla.core.xla_model as xm
-        import torch_xla.distributed.parallel_loader as pl
-        
-        # Determine batch size for TPU
-        # TPUs work best with larger batch sizes, typically 128 per core
-        batch_size = args.train_batch_size  # Already set to per-core batch size
-        
-        # Create distributed sampler
-        train_sampler = torch.utils.data.distributed.DistributedSampler(
-            train_dataset_group,
-            num_replicas=xm.xrt_world_size(),  # Total number of TPU cores
-            rank=xm.get_ordinal(),              # Current core's rank
-            shuffle=True
-        )
-        
-        # Create DataLoader with distributed sampler
-        train_dataloader = torch.utils.data.DataLoader(
-            train_dataset_group,
-            batch_size=batch_size,
-            sampler=train_sampler,
-            num_workers=args.max_data_loader_n_workers,
-            pin_memory=True,
-            drop_last=True  # Ensures consistent batch sizes across cores
-        )
-        
-        return train_dataloader
-
-    if getattr(args, 'use_tpu', False):
-        train_dataloader = prepare_tpu_dataloader(train_dataset_group, args)
-    else:
+    if train_dataloader is None: #If no train_dataloader is passed in.
+        # Prepare Dataloader
+        # Number of DataLoader processes: Note that 0 means persistent_workers cannot be used.
+        n_workers = min(args.max_data_loader_n_workers, os.cpu_count())  # cpu_count or max_data_loader_n_workers
         train_dataloader = torch.utils.data.DataLoader(
             train_dataset_group,
             batch_size=1,
             shuffle=True,
             collate_fn=collator,
             num_workers=n_workers,
+            persistent_workers=args.persistent_data_loader_workers and n_workers > 0,
         )
-            
-
-    if getattr(args, 'use_tpu', False):
-        # Wrap the DataLoader with ParallelLoader
-        para_loader = pl.ParallelLoader(train_dataloader, [xm.xla_device()])
-        train_dataloader = para_loader.per_device_loader(xm.xla_device())
     
-
     # Calculate the number of training steps
     if args.max_train_epochs is not None:
         args.max_train_steps = args.max_train_epochs * math.ceil(
             len(train_dataloader) / accelerator.num_processes / args.gradient_accumulation_steps
         )
         accelerator.print(
-            f"override steps. steps for {args.max_train_epochs} epochs is / 指定エポックまでのステップ数: {args.max_train_steps}"
+            f"override steps. steps for {args.max_train_epochs} epochs is: {args.max_train_steps}"
         )
 
     # Send training steps to the dataset side as well
