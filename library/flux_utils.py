@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple, Union
 
 import einops
 import torch
-from accelerate import init_empty_weights
+# from accelerate import init_empty_weights # removed accelerate
 from safetensors import safe_open
 from safetensors.torch import load_file
 from transformers import CLIPConfig, CLIPTextModel, T5Config, T5EncoderModel
@@ -99,20 +99,21 @@ def load_flow_model(
 
     # build model
     logger.info(f"Building Flux model {name} from {'Diffusers' if is_diffusers else 'BFL'} checkpoint")
-    with torch.device("meta"):
-        params = flux_models.configs[name].params
+    # with torch.device("meta"): # removed meta device
+    params = flux_models.configs[name].params
 
-        # set the number of blocks
-        if params.depth != num_double_blocks:
-            logger.info(f"Setting the number of double blocks from {params.depth} to {num_double_blocks}")
-            params = replace(params, depth=num_double_blocks)
-        if params.depth_single_blocks != num_single_blocks:
-            logger.info(f"Setting the number of single blocks from {params.depth_single_blocks} to {num_single_blocks}")
-            params = replace(params, depth_single_blocks=num_single_blocks)
+    # set the number of blocks
+    if params.depth != num_double_blocks:
+        logger.info(f"Setting the number of double blocks from {params.depth} to {num_double_blocks}")
+        params = replace(params, depth=num_double_blocks)
+    if params.depth_single_blocks != num_single_blocks:
+        logger.info(f"Setting the number of single blocks from {params.depth_single_blocks} to {num_single_blocks}")
+        params = replace(params, depth_single_blocks=num_single_blocks)
 
-        model = flux_models.Flux(params)
-        if dtype is not None:
-            model = model.to(dtype)
+    model = flux_models.Flux(params).to(device)
+    if dtype is not None:
+        model = model.to(dtype)
+
 
     # load_sft doesn't support torch.device
     logger.info(f"Loading state dict from {ckpt_path}")
@@ -142,9 +143,9 @@ def load_ae(
     ckpt_path: str, dtype: torch.dtype, device: Union[str, torch.device], disable_mmap: bool = False
 ) -> flux_models.AutoEncoder:
     logger.info("Building AutoEncoder")
-    with torch.device("meta"):
-        # dev and schnell have the same AE params
-        ae = flux_models.AutoEncoder(flux_models.configs[MODEL_NAME_DEV].ae_params).to(dtype)
+    # with torch.device("meta"): # removed meta device
+    # dev and schnell have the same AE params
+    ae = flux_models.AutoEncoder(flux_models.configs[MODEL_NAME_DEV].ae_params).to(dtype).to(device)
 
     logger.info(f"Loading state dict from {ckpt_path}")
     sd = load_safetensors(ckpt_path, device=str(device), disable_mmap=disable_mmap, dtype=dtype)
@@ -158,8 +159,8 @@ def load_controlnet(
 ):
     logger.info("Building ControlNet")
     name = MODEL_NAME_DEV if not is_schnell else MODEL_NAME_SCHNELL
-    with torch.device(device):
-        controlnet = flux_models.ControlNetFlux(flux_models.configs[name].params).to(dtype)
+    # with torch.device(device): # removed meta device
+    controlnet = flux_models.ControlNetFlux(flux_models.configs[name].params).to(dtype).to(device)
 
     if ckpt_path is not None:
         logger.info(f"Loading state dict from {ckpt_path}")
@@ -266,8 +267,8 @@ def load_clip_l(
         # "transformers_version": None,
     }
     config = CLIPConfig(**CLIPL_CONFIG)
-    with init_empty_weights():
-        clip = CLIPTextModel._from_config(config)
+    # with init_empty_weights(): # removed accelerate
+    clip = CLIPTextModel._from_config(config).to(device)
 
     if state_dict is not None:
         sd = state_dict
@@ -321,8 +322,8 @@ def load_t5xxl(
 """
     config = json.loads(T5_CONFIG_JSON)
     config = T5Config(**config)
-    with init_empty_weights():
-        t5xxl = T5EncoderModel._from_config(config)
+    # with init_empty_weights(): # removed accelerate
+    t5xxl = T5EncoderModel._from_config(config).to(device)
 
     if state_dict is not None:
         sd = state_dict
