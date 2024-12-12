@@ -8,7 +8,7 @@ import time
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import torch
-from accelerate import Accelerator, PartialState
+# from accelerate import Accelerator, PartialState # removed accelerate dependency
 from transformers import CLIPTextModel
 from tqdm import tqdm
 from PIL import Image
@@ -26,12 +26,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+import torch_xla.core.xla_model as xm
+import torch_xla.distributed.parallel_loader as pl
+import torch_xla.distributed.xla_backend
+
 
 # region sample images
 
 
 def sample_images(
-    accelerator: Accelerator,
+    device: torch.device,
     args: argparse.Namespace,
     epoch,
     steps,
@@ -61,15 +65,18 @@ def sample_images(
     if not os.path.isfile(args.sample_prompts) and sample_prompts_te_outputs is None:
         logger.error(f"No prompt file / プロンプトファイルがありません: {args.sample_prompts}")
         return
+    
+    if xm.get_ordinal() != 0:
+        return
 
-    distributed_state = PartialState()  # for multi gpu distributed inference. this is a singleton, so it's safe to use it here
-
+    # distributed_state = PartialState()  # for multi gpu distributed inference. this is a singleton, so it's safe to use it here # removed partial state
+    num_processes = xm.xrt_world_size()
     # unwrap unet and text_encoder(s)
-    flux = accelerator.unwrap_model(flux)
-    if text_encoders is not None:
-        text_encoders = [accelerator.unwrap_model(te) for te in text_encoders]
-    if controlnet is not None:
-        controlnet = accelerator.unwrap_model(controlnet)
+    # flux = accelerator.unwrap_model(flux) # removed accelerator model unwrapping
+    # if text_encoders is not None:
+    #     text_encoders = [accelerator.unwrap_model(te) for te in text_encoders] # removed accelerator model unwrapping
+    # if controlnet is not None:
+    #     controlnet = accelerator.unwrap_model(controlnet)  # removed accelerator model unwrapping
     # print([(te.parameters().__next__().device if te is not None else None) for te in text_encoders])
 
     prompts = train_util.load_prompts(args.sample_prompts)
@@ -85,12 +92,12 @@ def sample_images(
     except Exception:
         pass
 
-    if distributed_state.num_processes <= 1:
+    if num_processes <= 1:
         # If only one device is available, just use the original prompt list. We don't need to care about the distribution of prompts.
-        with torch.no_grad(), accelerator.autocast():
+        with torch.no_grad(), torch.autocast(device.type):
             for prompt_dict in prompts:
                 sample_image_inference(
-                    accelerator,
+                    device,
                     args,
                     flux,
                     text_encoders,
@@ -107,36 +114,37 @@ def sample_images(
         # Creating list with N elements, where each element is a list of prompt_dicts, and N is the number of processes available (number of devices available)
         # prompt_dicts are assigned to lists based on order of processes, to attempt to time the image creation time to match enum order. Probably only works when steps and sampler are identical.
         per_process_prompts = []  # list of lists
-        for i in range(distributed_state.num_processes):
-            per_process_prompts.append(prompts[i :: distributed_state.num_processes])
+        for i in range(num_processes):
+            per_process_prompts.append(prompts[i :: num_processes])
 
         with torch.no_grad():
-            with distributed_state.split_between_processes(per_process_prompts) as prompt_dict_lists:
-                for prompt_dict in prompt_dict_lists[0]:
-                    sample_image_inference(
-                        accelerator,
-                        args,
-                        flux,
-                        text_encoders,
-                        ae,
-                        save_dir,
-                        prompt_dict,
-                        epoch,
-                        steps,
-                        sample_prompts_te_outputs,
-                        prompt_replacement,
-                        controlnet
-                    )
+            # with distributed_state.split_between_processes(per_process_prompts) as prompt_dict_lists: # removed accelerator
+            prompt_dict_lists = per_process_prompts
+            for prompt_dict in prompt_dict_lists[0]:
+                sample_image_inference(
+                    device,
+                    args,
+                    flux,
+                    text_encoders,
+                    ae,
+                    save_dir,
+                    prompt_dict,
+                    epoch,
+                    steps,
+                    sample_prompts_te_outputs,
+                    prompt_replacement,
+                    controlnet
+                )
 
     torch.set_rng_state(rng_state)
     if cuda_rng_state is not None:
         torch.cuda.set_rng_state(cuda_rng_state)
 
-    clean_memory_on_device(accelerator.device)
+    clean_memory_on_device(device)
 
 
 def sample_image_inference(
-    accelerator: Accelerator,
+    device: torch.device,
     args: argparse.Namespace,
     flux: flux_models.Flux,
     text_encoders: Optional[List[CLIPTextModel]],
@@ -220,33 +228,33 @@ def sample_image_inference(
         1,
         packed_latent_height * packed_latent_width,
         16 * 2 * 2,
-        device=accelerator.device,
+        device=device,
         dtype=weight_dtype,
-        generator=torch.Generator(device=accelerator.device).manual_seed(seed) if seed is not None else None,
+        generator=torch.Generator(device=device).manual_seed(seed) if seed is not None else None,
     )
     timesteps = get_schedule(sample_steps, noise.shape[1], shift=True)  # FLUX.1 dev -> shift=True
-    img_ids = flux_utils.prepare_img_ids(1, packed_latent_height, packed_latent_width).to(accelerator.device, weight_dtype)
-    t5_attn_mask = t5_attn_mask.to(accelerator.device) if args.apply_t5_attn_mask else None
+    img_ids = flux_utils.prepare_img_ids(1, packed_latent_height, packed_latent_width).to(device, weight_dtype)
+    t5_attn_mask = t5_attn_mask.to(device) if args.apply_t5_attn_mask else None
 
     if controlnet_image is not None:
         controlnet_image = Image.open(controlnet_image).convert("RGB")
         controlnet_image = controlnet_image.resize((width, height), Image.LANCZOS)
         controlnet_image = torch.from_numpy((np.array(controlnet_image) / 127.5) - 1)
-        controlnet_image = controlnet_image.permute(2, 0, 1).unsqueeze(0).to(weight_dtype).to(accelerator.device)
+        controlnet_image = controlnet_image.permute(2, 0, 1).unsqueeze(0).to(weight_dtype).to(device)
 
-    with accelerator.autocast(), torch.no_grad():
+    with torch.autocast(device.type), torch.no_grad():
         x = denoise(flux, noise, img_ids, t5_out, txt_ids, l_pooled, timesteps=timesteps, guidance=scale, t5_attn_mask=t5_attn_mask, controlnet=controlnet, controlnet_img=controlnet_image)
 
     x = flux_utils.unpack_latents(x, packed_latent_height, packed_latent_width)
 
     # latent to image
-    clean_memory_on_device(accelerator.device)
+    clean_memory_on_device(device)
     org_vae_device = ae.device  # will be on cpu
-    ae.to(accelerator.device)  # distributed_state.device is same as accelerator.device
-    with accelerator.autocast(), torch.no_grad():
+    ae.to(device)  # distributed_state.device is same as accelerator.device # changed to xla device
+    with torch.autocast(device.type), torch.no_grad():
         x = ae.decode(x)
     ae.to(org_vae_device)
-    clean_memory_on_device(accelerator.device)
+    clean_memory_on_device(device)
 
     x = x.clamp(-1, 1)
     x = x.permute(0, 2, 3, 1)
@@ -263,13 +271,9 @@ def sample_image_inference(
     image.save(os.path.join(save_dir, img_filename))
 
     # send images to wandb if enabled
-    if "wandb" in [tracker.name for tracker in accelerator.trackers]:
-        wandb_tracker = accelerator.get_tracker("wandb")
-
-        import wandb
-
-        # not to commit images to avoid inconsistency between training and logging steps
-        wandb_tracker.log({f"sample_{i}": wandb.Image(image, caption=prompt)}, commit=False)  # positive prompt as a caption
+    import wandb
+    if xm.get_ordinal() == 0:
+      wandb.log({f"sample_{i}": wandb.Image(image, caption=prompt)}, commit=False)  # positive prompt as a caption
 
 
 def time_shift(mu: float, sigma: float, t: torch.Tensor):
@@ -523,7 +527,7 @@ def save_flux_model_on_train_end(
 def save_flux_model_on_epoch_end_or_stepwise(
     args: argparse.Namespace,
     on_epoch_end: bool,
-    accelerator,
+    device: torch.device, # changed to xla device
     save_dtype: torch.dtype,
     epoch: int,
     num_train_epochs: int,
@@ -537,7 +541,7 @@ def save_flux_model_on_epoch_end_or_stepwise(
     train_util.save_sd_model_on_epoch_end_or_stepwise_common(
         args,
         on_epoch_end,
-        accelerator,
+        device, # changed to xla device
         True,
         True,
         epoch,
