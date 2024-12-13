@@ -53,7 +53,7 @@ from library.custom_train_functions import apply_masked_loss, add_custom_train_a
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
 import torch_xla.distributed.xla_backend
-import torch_xla.optim as xoptim # corrected import
+# import torch_xla.optim as xoptim # incorrect import removed
 import torch_xla.utils.serialization as xser
 
 
@@ -378,8 +378,8 @@ def train(args):
         # prepare optimizers for each group
         optimizers = []
         for group in grouped_params:
-            _, _, optimizer = train_util.get_optimizer(args, trainable_params=[group]) # original optimizer
-            optimizer = xoptim.Adam(group['params'], lr=group['lr']) # xla optimizer
+            #_, _, optimizer = train_util.get_optimizer(args, trainable_params=[group]) # original optimizer
+            optimizer = xoptim.Adam(group['params'], lr=group['lr'])  # Use Adam directly from torch_xla.core.xla_model
             optimizers.append(optimizer)
         optimizer = optimizers[0]  # avoid error in the following code
 
@@ -390,7 +390,7 @@ def train(args):
         optimizer_train_fn = lambda: None  # dummy function
         optimizer_eval_fn = lambda: None  # dummy function
     else:
-        _, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
+        #_, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
         optimizer = xoptim.Adam(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr']) # replace with xla optimizer
         optimizer_train_fn, optimizer_eval_fn = train_util.get_optimizer_train_eval_fn(optimizer, args)
 
