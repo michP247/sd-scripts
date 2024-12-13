@@ -5758,15 +5758,24 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
                 shutil.rmtree(state_dir_old)
 
 
-def save_state_on_train_end(args: argparse.Namespace, accelerator):
-    model_name = default_if_none(args.output_name, DEFAULT_LAST_OUTPUT_NAME)
+def save_state_on_train_end(args, device): # added device arg
+    if args.save_state_on_train_end and not args.save_state:
+        args.save_state = True
+        logger.info("save_state_on_train_end is enabled, so saving state at the end of training / save_state_on_train_endが有効になっているため、学習終了時に状態を保存します")
 
-    logger.info("")
-    logger.info("saving last state.")
-    os.makedirs(args.output_dir, exist_ok=True)
+    if not args.save_state:
+        return
 
-    state_dir = os.path.join(args.output_dir, LAST_STATE_NAME.format(model_name))
-    accelerator.save_state(state_dir)
+    save_dir = os.path.join(args.output_dir, "training_state")
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, "training_state.pt")
+    logger.info(f"saving training state to {save_path}")
+    state = {"args": vars(args)}
+    # add accelerator state if needed
+    # accelerator.save_state(save_path) # removed accelerator
+
+    torch.save(state, save_path) # save training arguments
+    logger.info(f"saved training state to {save_path}")
 
     if args.save_state_to_huggingface:
         logger.info("uploading last state to huggingface.")

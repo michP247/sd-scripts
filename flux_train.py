@@ -53,7 +53,7 @@ from library.custom_train_functions import apply_masked_loss, add_custom_train_a
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
 import torch_xla.distributed.xla_backend
-import torch_xla.distributed.xla_optim as xoptim
+import torch_xla.optim as xoptim # corrected import
 import torch_xla.utils.serialization as xser
 
 
@@ -621,10 +621,10 @@ def train(args):
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
 
-            if args.                blockwise_fused_optimizers:
-                    optimizer_hooked_count = {i: 0 for i in range(len(optimizers))}  # reset counter for each step
-
-            # with accelerator.accumulate(*training_models): # removed accelerator, manually accumulate gradients.
+            if args.blockwise_fused_optimizers:
+                optimizer_hooked_count = {i: 0 for i in range(len(optimizers))}  # reset counter for each step
+            
+                        # with accelerator.accumulate(*training_models): # removed accelerator, manually accumulate gradients.
             for model in training_models:
                 model.zero_grad(set_to_none=True)
             with torch.autocast(device.type): # add autocast for XLA
