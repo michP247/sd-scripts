@@ -391,7 +391,7 @@ def train(args):
         optimizer_eval_fn = lambda: None  # dummy function
     else:
         #_, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
-        optimizer = xoptim.Adam(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr']) # replace with xla optimizer
+        optimizer = xm.optimizer.Adam(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr'])
         optimizer_train_fn, optimizer_eval_fn = train_util.get_optimizer_train_eval_fn(optimizer, args)
 
     # prepare dataloader
