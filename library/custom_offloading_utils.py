@@ -6,7 +6,6 @@ import torch.nn as nn
 
 from library.device_utils import clean_memory_on_device
 
-
 def synchronize_device(device: torch.device):
     if device.type == "cuda":
         torch.cuda.synchronize()
@@ -14,7 +13,6 @@ def synchronize_device(device: torch.device):
         torch.xpu.synchronize()
     elif device.type == "mps":
         torch.mps.synchronize()
-
 
 def swap_weight_devices_cuda(device: torch.device, layer_to_cpu: nn.Module, layer_to_cuda: nn.Module):
     assert layer_to_cpu.__class__ == layer_to_cuda.__class__
@@ -59,7 +57,6 @@ def swap_weight_devices_cuda(device: torch.device, layer_to_cpu: nn.Module, laye
     stream.synchronize()
     torch.cuda.current_stream().synchronize()  # this prevents the illegal loss value
 
-
 def swap_weight_devices_no_cuda(device: torch.device, layer_to_cpu: nn.Module, layer_to_cuda: nn.Module):
     """
     not tested
@@ -75,21 +72,24 @@ def swap_weight_devices_no_cuda(device: torch.device, layer_to_cpu: nn.Module, l
     for module_to_cpu, module_to_cuda, cuda_data_view, cpu_data_view in weight_swap_jobs:
         module_to_cpu.weight.data = cuda_data_view.data.to("cpu", non_blocking=True)
 
-    synchronize_device()
+    synchronize_device(device)
 
     # cpu to device
     for module_to_cpu, module_to_cuda, cuda_data_view, cpu_data_view in weight_swap_jobs:
         cuda_data_view.copy_(module_to_cuda.weight.data, non_blocking=True)
         module_to_cuda.weight.data = cuda_data_view
 
-    synchronize_device()
+    synchronize_device(device)
 
+def parameters_to_device(layer, device):
+    for param in layer.parameters():
+        param.data = param.data.to(device)
+    for buffer in layer.buffers():
+        buffer.data = buffer.data.to(device)
 
-def weighs_to_device(layer: nn.Module, device: torch.device):
-    for module in layer.modules():
-        if hasattr(module, "weight") and module.weight is not None:
-            module.weight.data = module.weight.data.to(device, non_blocking=True)
-
+def buffers_to_device(layer, device):
+    for buffer in layer.buffers():
+        buffer.data = buffer.data.to(device)
 
 class Offloader:
     """
@@ -147,7 +147,6 @@ class Offloader:
         if self.debug:
             print(f"Waited for block {block_idx}: {time.perf_counter()-start_time:.2f}s")
 
-
 class ModelOffloader(Offloader):
     """
     supports forward offloading
@@ -203,11 +202,11 @@ class ModelOffloader(Offloader):
 
         for b in blocks[0 : self.num_blocks - self.blocks_to_swap]:
             b.to(self.device)
-            weighs_to_device(b, self.device)  # make sure weights are on device
+            parameters_to_device(b, self.device)  # make sure weights are on device
 
         for b in blocks[self.num_blocks - self.blocks_to_swap :]:
             b.to(self.device)  # move block to device first
-            weighs_to_device(b, "cpu")  # make sure weights are on cpu
+            parameters_to_device(b, "cpu")  # make sure weights are on cpu
 
         synchronize_device(self.device)
         clean_memory_on_device(self.device)
