@@ -85,10 +85,8 @@ def parameters_to_device(layer, device):
     for name, param in layer.named_parameters():
         if param.data.device != device:
             print(f"Moving parameter '{name}' to {device}")
-            # Create a new tensor on the target device with bfloat16 dtype
-            new_param = torch.empty_like(param.data, device=device, dtype=torch.bfloat16)
-            new_param.copy_(param.data)
-            param.data = new_param
+            # Directly use the move function
+            param.data = torch.Tensor(param.data).to(device).bfloat16()
 
             print(f"  New device: {param.data.device}")
             print(f"  New dtype: {param.data.dtype}")
@@ -97,10 +95,8 @@ def buffers_to_device(layer, device):
     for name, buffer in layer.named_buffers():
         if buffer.data.device != device:
             print(f"Moving buffer '{name}' to {device}")
-            # Create a new tensor on the target device with bfloat16 dtype
-            new_buffer = torch.empty_like(buffer.data, device=device, dtype=torch.bfloat16)
-            new_buffer.copy_(buffer.data)
-            buffer.data = new_buffer
+             # Directly use the move function
+            buffer.data = torch.Tensor(buffer.data).to(device).bfloat16()
             
             print(f"  New device: {buffer.data.device}")
             print(f"  New dtype: {buffer.data.dtype}")
