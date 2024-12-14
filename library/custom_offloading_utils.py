@@ -4,7 +4,8 @@ from typing import Optional
 import torch
 import torch.nn as nn
 from library.device_utils import clean_memory_on_device
-
+import torch
+import time
 import torch_xla.core.xla_model as xm
 import torch.nn as nn
 from typing import Optional, Tuple
@@ -186,18 +187,6 @@ class ModelOffloader(Offloader):
             if hook is not None:
                 handle = block.register_full_backward_hook(hook)
                 self.remove_handles.append(handle)
-
-    # Add this new method
-    def move_to_device_for_block(self, block: nn.Module, device: torch.device):
-        # Check if the block has any parameters before attempting to access .weight
-        if any(p.requires_grad for p in block.parameters()):
-            # Find the first parameter and check its device
-            first_param = next((p for p in block.parameters()), None)
-            if first_param is not None and first_param.device != device:
-                print(f"Moving block of type {block.__class__.__name__} to {device}")
-                block.to(device)
-        else:
-            print(f"Block of type {block.__class__.__name__} has no parameters to move.")
 
     def __del__(self):
         for handle in self.remove_handles:
