@@ -288,10 +288,7 @@ def train(args):
     # Do not call flux.to(device) here
 
     if args.gradient_checkpointing:
-        unet.enable_gradient_checkpointing()
-        text_encoder1.gradient_checkpointing_enable()
-        text_encoder2.gradient_checkpointing_enable()
-        flux.enable_gradient_checkpointing(cpu_offload=args.blocks_to_swap == 0) # disable cpu offload if swapping
+        flux.enable_gradient_checkpointing(cpu_offload=args.cpu_offload_checkpointing)
 
     flux.requires_grad_(True)
 
