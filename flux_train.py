@@ -384,7 +384,7 @@ def train(args):
         optimizers = []
         for group in grouped_params:
            if args.optimizer_type.lower() == "adafactor":
-               optimizer = xm.Adafactor(
+                optimizer = bnb.optim.Adafactor(
                     group['params'],
                     lr=group['lr'],
                     scale_parameter=args.optimizer_args[0].split('=')[1].lower() == 'true',  # Extract from optimizer_args
@@ -392,12 +392,12 @@ def train(args):
                     warmup_init=args.optimizer_args[2].split('=')[1].lower() == 'true',  # Extract from optimizer_args
                     weight_decay=float(args.optimizer_args[3].split('=')[1]),  # Extract from optimizer_args
                 )
-               logger.info("Using Adafactor optimizer from torch_xla.core.xla_model")
+                logger.info("Using Adafactor optimizer from bitsandbytes")
            else:
-               # Use AdamW for other optimizers
-               optimizer = xm.AdamW(group['params'], lr=group['lr'])
-               logger.info("Using AdamW optimizer from torch_xla.core.xla_model")
+                optimizer = xm.AdamW(group['params'], lr=group['lr'])
+                logger.info("Using AdamW optimizer from torch_xla.core.xla_model")
            optimizers.append(optimizer)
+
         optimizer = optimizers[0]  # avoid error in the following code
 
         logger.info(f"using {len(optimizers)} optimizers for blockwise fused optimizers")
@@ -408,8 +408,8 @@ def train(args):
         optimizer_eval_fn = lambda: None  # dummy function
     else:
        if args.optimizer_type.lower() == "adafactor":
-            # Use xoptim.Adafactor for XLA compatibility
-            optimizer = xm.Adafactor(
+            # Use Adafactor from bitsandbytes
+            optimizer = bnb.optim.Adafactor(
                 params_to_optimize[0]['params'],
                 lr=params_to_optimize[0]['lr'],
                 scale_parameter=args.optimizer_args[0].split('=')[1].lower() == 'true',  # Extract from optimizer_args
@@ -417,7 +417,7 @@ def train(args):
                 warmup_init=args.optimizer_args[2].split('=')[1].lower() == 'true',  # Extract from optimizer_args
                 weight_decay=float(args.optimizer_args[3].split('=')[1]),  # Extract from optimizer_args
             )
-            logger.info("Using Adafactor optimizer from torch_xla.core.xla_model")
+            logger.info("Using Adafactor optimizer from bitsandbytes")
        else:
            # Use torch.optim.AdamW with XLA optimizations
            optimizer = xm.AdamW(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr'])
