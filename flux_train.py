@@ -58,7 +58,7 @@ import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
 import torch_xla.utils.utils as xu
 import torch_xla.distributed.xla_multiprocessing as xmp
-#import torch_xla.optimizers as xoptim
+import torch.optim as optim
 
 
 def train(args):
@@ -383,9 +383,21 @@ def train(args):
         # prepare optimizers for each group
         optimizers = []
         for group in grouped_params:
-            #_, _, optimizer = train_util.get_optimizer(args, trainable_params=[group]) # original optimizer
-            optimizer = xm.Adam(group['params'], lr=group['lr']) # Use Adam directly from torch_xla.core.xla_model
-            optimizers.append(optimizer)
+           if args.optimizer_type.lower() == "adafactor":
+               optimizer = xm.Adafactor(
+                    group['params'],
+                    lr=group['lr'],
+                    scale_parameter=args.optimizer_args[0].split('=')[1].lower() == 'true',  # Extract from optimizer_args
+                    relative_step=args.optimizer_args[1].split('=')[1].lower() == 'true',  # Extract from optimizer_args
+                    warmup_init=args.optimizer_args[2].split('=')[1].lower() == 'true',  # Extract from optimizer_args
+                    weight_decay=float(args.optimizer_args[3].split('=')[1]),  # Extract from optimizer_args
+                )
+               logger.info("Using Adafactor optimizer from torch_xla.core.xla_model")
+           else:
+               # Use AdamW for other optimizers
+               optimizer = xm.AdamW(group['params'], lr=group['lr'])
+               logger.info("Using AdamW optimizer from torch_xla.core.xla_model")
+           optimizers.append(optimizer)
         optimizer = optimizers[0]  # avoid error in the following code
 
         logger.info(f"using {len(optimizers)} optimizers for blockwise fused optimizers")
@@ -395,14 +407,9 @@ def train(args):
         optimizer_train_fn = lambda: None  # dummy function
         optimizer_eval_fn = lambda: None  # dummy function
     else:
-        if args.optimizer_type.lower() == "adafactor":
-            # Use torch.optim.Adafactor for compatibility
-            try:
-                from torch.optim import Adafactor
-            except ImportError:
-                raise ImportError("Please install torch.optim.Adafactor: pip install torch.optim.Adafactor")
-
-            optimizer = Adafactor(
+       if args.optimizer_type.lower() == "adafactor":
+            # Use xoptim.Adafactor for XLA compatibility
+            optimizer = xm.Adafactor(
                 params_to_optimize[0]['params'],
                 lr=params_to_optimize[0]['lr'],
                 scale_parameter=args.optimizer_args[0].split('=')[1].lower() == 'true',  # Extract from optimizer_args
@@ -410,18 +417,13 @@ def train(args):
                 warmup_init=args.optimizer_args[2].split('=')[1].lower() == 'true',  # Extract from optimizer_args
                 weight_decay=float(args.optimizer_args[3].split('=')[1]),  # Extract from optimizer_args
             )
-            logger.info("Using Adafactor optimizer from torch.optim")
+            logger.info("Using Adafactor optimizer from torch_xla.core.xla_model")
+       else:
+           # Use torch.optim.AdamW with XLA optimizations
+           optimizer = xm.AdamW(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr'])
+           logger.info("Using AdamW optimizer from torch_xla.core.xla_model")
 
-        else:
-            # Use torch.optim.AdamW
-            optimizer = optim.AdamW(
-                params_to_optimize[0]['params'],
-                lr=params_to_optimize[0]['lr'],
-                weight_decay=float(args.optimizer_args[3].split('=')[1]) # set weight decay
-            )
-            logger.info("Using AdamW optimizer from torch.optim")
-
-        optimizer_train_fn, optimizer_eval_fn = train_util.get_optimizer_train_eval_fn(optimizer, args)
+       optimizer_train_fn, optimizer_eval_fn = train_util.get_optimizer_train_eval_fn(optimizer, args)
 
     # prepare dataloader
     # strategies are set here because they cannot be referenced in another process. Copy them with the dataset
