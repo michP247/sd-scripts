@@ -82,14 +82,16 @@ def swap_weight_devices_no_cuda(device: torch.device, layer_to_cpu: nn.Module, l
     synchronize_device(device)
 
 def parameters_to_device(layer, device):
-    for param in layer.parameters():
-        param.data = param.data.to(device)
-    for buffer in layer.buffers():
-        buffer.data = buffer.data.to(device)
+    for name, param in layer.named_parameters():
+        if param.data.device != device:
+            print(f"Moving parameter '{name}' to {device}")
+            param.data = param.data.to(device)
 
 def buffers_to_device(layer, device):
-    for buffer in layer.buffers():
-        buffer.data = buffer.data.to(device)
+    for name, buffer in layer.named_buffers():
+        if buffer.data.device != device:
+            print(f"Moving buffer '{name}' to {device}")
+            buffer.data = buffer.data.to(device)
 
 class Offloader:
     """
@@ -200,15 +202,24 @@ class ModelOffloader(Offloader):
         if self.debug:
             print("Prepare block devices before forward")
 
-        for b in blocks[0 : self.num_blocks - self.blocks_to_swap]:
+        synchronize_device(self.device)  # Synchronize before starting
+
+        for i, b in enumerate(blocks[0 : self.num_blocks - self.blocks_to_swap]):
+            if self.debug:
+                print(f"Processing block {i}: moving to device")
             b.to(self.device)
-            parameters_to_device(b, self.device)  # make sure weights are on device
+            parameters_to_device(b, self.device)  # Ensure parameters are on device
+            buffers_to_device(b, self.device)  # Ensure buffers are on device
 
-        for b in blocks[self.num_blocks - self.blocks_to_swap :]:
-            b.to(self.device)  # move block to device first
-            parameters_to_device(b, "cpu")  # make sure weights are on cpu
+        for i, b in enumerate(blocks[self.num_blocks - self.blocks_to_swap :]):
+            block_index = self.num_blocks - self.blocks_to_swap + i
+            if self.debug:
+                print(f"Processing block {block_index}: moving to device, then parameters/buffers to CPU")
+            b.to(self.device)  # Move block to device first
+            parameters_to_device(b, "cpu")  # Move parameters to CPU
+            buffers_to_device(b, "cpu") # Move buffers to CPU
 
-        synchronize_device(self.device)
+        synchronize_device(self.device)  # Synchronize after moving
         clean_memory_on_device(self.device)
 
     def wait_for_block(self, block_idx: int):
