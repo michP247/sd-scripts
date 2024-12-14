@@ -1078,11 +1078,11 @@ class BaseDataset(torch.utils.data.Dataset):
         process_index = xm.get_ordinal()
 
         # define a function to submit a batch to cache
-        def submit_batch(batch, cond):
+        def submit_batch(batch, cond, device): # add device argument
             for info in batch:
                 if info.image is not None and isinstance(info.image, Future):
                     info.image = info.image.result()  # future to image
-            caching_strategy.cache_batch_latents(model, batch, cond.flip_aug, cond.alpha_mask, cond.random_crop)
+            caching_strategy.cache_batch_latents(model, batch, cond.flip_aug, cond.alpha_mask, cond.random_crop, device) # pass device here
 
             # remove image from memory
             for info in batch:
