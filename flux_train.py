@@ -211,7 +211,7 @@ def train(args):
 
         ae.to("cpu")  # if no sampling, vae can be deleted
         clean_memory_on_device(device)
-        xm.rendezvous()
+        xm.rendezvous("load-vae-and-cache-latents")
         # accelerator.wait_for_everyone() # removed accelerate
 
     # prepare tokenize strategy
@@ -271,7 +271,7 @@ def train(args):
                             )
 
         # accelerator.wait_for_everyone() # removed accelerate
-        xm.rendezvous()
+        xm.rendezvous("cache-text-encoder-outputs")
 
         # now we can delete Text Encoders to free memory
         clip_l = None
@@ -749,7 +749,7 @@ def train(args):
                     # 指定ステップごとにモデルを保存
                     if args.save_every_n_steps is not None and global_step % args.save_every_n_steps == 0:
                         # accelerator.wait_for_everyone() # removed accelerator
-                        xm.rendezvous()
+                        xm.rendezvous("save-every-n-steps")
                         # if accelerator.is_main_process: # removed accelerator
                         flux_train_utils.save_flux_model_on_epoch_end_or_stepwise(
                             args,
@@ -785,7 +785,7 @@ def train(args):
 
 
         # accelerator.wait_for_everyone() # removed accelerator. no need for XLA
-        xm.rendezvous()
+        xm.rendezvous("end-of-epoch")
 
         optimizer_eval_fn()
         if args.save_every_n_epochs is not None:
