@@ -378,26 +378,14 @@ def train(args):
             num_params = 0
             for p in param_group:
                 num_params += p.numel()
-            logger.info(f"block {param_group_key}: {num_params} parameters")
+            # Replace accelerator.print with xm.master_print for TPU
+            xm.master_print(f"block {param_group_key}: {num_params} parameters")
 
         # prepare optimizers for each group
         optimizers = []
         for group in grouped_params:
-           if args.optimizer_type.lower() == "adafactor":
-                optimizer = bnb.optim.Adafactor(
-                    group['params'],
-                    lr=group['lr'],
-                    scale_parameter=args.optimizer_args[0].split('=')[1].lower() == 'true',  # Extract from optimizer_args
-                    relative_step=args.optimizer_args[1].split('=')[1].lower() == 'true',  # Extract from optimizer_args
-                    warmup_init=args.optimizer_args[2].split('=')[1].lower() == 'true',  # Extract from optimizer_args
-                    weight_decay=float(args.optimizer_args[3].split('=')[1]),  # Extract from optimizer_args
-                )
-                logger.info("Using Adafactor optimizer from bitsandbytes")
-           else:
-                optimizer = xm.AdamW(group['params'], lr=group['lr'])
-                logger.info("Using AdamW optimizer from torch_xla.core.xla_model")
-           optimizers.append(optimizer)
-
+            _, _, optimizer = train_util.get_optimizer(args, trainable_params=[group])
+            optimizers.append(optimizer)
         optimizer = optimizers[0]  # avoid error in the following code
 
         logger.info(f"using {len(optimizers)} optimizers for blockwise fused optimizers")
@@ -407,23 +395,8 @@ def train(args):
         optimizer_train_fn = lambda: None  # dummy function
         optimizer_eval_fn = lambda: None  # dummy function
     else:
-       if args.optimizer_type.lower() == "adafactor":
-            # Use Adafactor from bitsandbytes
-            optimizer = bnb.optim.Adafactor(
-                params_to_optimize[0]['params'],
-                lr=params_to_optimize[0]['lr'],
-                scale_parameter=args.optimizer_args[0].split('=')[1].lower() == 'true',  # Extract from optimizer_args
-                relative_step=args.optimizer_args[1].split('=')[1].lower() == 'true',  # Extract from optimizer_args
-                warmup_init=args.optimizer_args[2].split('=')[1].lower() == 'true',  # Extract from optimizer_args
-                weight_decay=float(args.optimizer_args[3].split('=')[1]),  # Extract from optimizer_args
-            )
-            logger.info("Using Adafactor optimizer from bitsandbytes")
-       else:
-           # Use torch.optim.AdamW with XLA optimizations
-           optimizer = xm.AdamW(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr'])
-           logger.info("Using AdamW optimizer from torch_xla.core.xla_model")
-
-       optimizer_train_fn, optimizer_eval_fn = train_util.get_optimizer_train_eval_fn(optimizer, args)
+        _, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
+        optimizer_train_fn, optimizer_eval_fn = train_util.get_optimizer_train_eval_fn(optimizer, args)
 
     # prepare dataloader
     # strategies are set here because they cannot be referenced in another process. Copy them with the dataset
