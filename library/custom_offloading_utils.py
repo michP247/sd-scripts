@@ -4,10 +4,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 from library.device_utils import clean_memory_on_device
-import torch
-import time
 import torch_xla.core.xla_model as xm
-import torch.nn as nn
 from typing import Optional, Tuple
 
 def get_memory_stats(device: torch.device) -> str:
