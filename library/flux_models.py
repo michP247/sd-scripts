@@ -563,7 +563,7 @@ class MLPEmbedder(nn.Module):
         return self.out_layer(self.silu(self.in_layer(x)))
 
     def forward(self, *args, **kwargs):
-        import torch.xla.core.xla_model as xm
+        import torch_xla.core.xla_model as xm
         if self.training and self.gradient_checkpointing:
             return checkpoint(self._forward, *args, use_reentrant=False, **kwargs)
         else:
@@ -741,7 +741,7 @@ class DoubleStreamBlock(nn.Module):
         self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, txt_attention_mask: Optional[Tensor] = None
     ) -> tuple[Tensor, Tensor]:
         if self.training and self.gradient_checkpointing:
-            import torch.xla.core.xla_model as xm
+            import torch_xla.core.xla_model as xm
             if not self.cpu_offload_checkpointing:
                 return checkpoint(self._forward, img, txt, vec, pe, txt_attention_mask, use_reentrant=False)
             # cpu offload checkpointing
@@ -841,7 +841,7 @@ class SingleStreamBlock(nn.Module):
 
     def forward(self, x: Tensor, vec: Tensor, pe: Tensor, txt_attention_mask: Optional[Tensor] = None) -> Tensor:
         if self.training and self.gradient_checkpointing:
-            import torch.xla.core.xla_model as xm
+            import torch_xla.core.xla_model as xm
             if not self.cpu_offload_checkpointing:
                 return checkpoint(self._forward, x, vec, pe, txt_attention_mask, use_reentrant=False)
 
