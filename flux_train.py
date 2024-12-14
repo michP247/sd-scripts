@@ -396,8 +396,7 @@ def train(args):
         optimizer_train_fn = lambda: None  # dummy function
         optimizer_eval_fn = lambda: None  # dummy function
     else:
-        # Use torch.optim.AdamW
-        optimizer = optim.AdamW(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr'])
+        _, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
         optimizer_train_fn, optimizer_eval_fn = train_util.get_optimizer_train_eval_fn(optimizer, args)
 
     # prepare dataloader

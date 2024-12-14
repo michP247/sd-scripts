@@ -15,8 +15,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 CLIP_L_TOKENIZER_ID = "openai/clip-vit-large-patch14"
 T5_XXL_TOKENIZER_ID = "google/t5-v1_1-xxl"
+
 
 class FluxTokenizeStrategy(TokenizeStrategy):
     def __init__(self, t5xxl_max_length: int = 512, tokenizer_cache_dir: Optional[str] = None) -> None:
@@ -35,6 +37,7 @@ class FluxTokenizeStrategy(TokenizeStrategy):
         t5_tokens = t5_tokens["input_ids"]
 
         return [l_tokens, t5_tokens, t5_attn_mask]
+
 
 class FluxTextEncodingStrategy(TextEncodingStrategy):
     def __init__(self, apply_t5_attn_mask: Optional[bool] = None) -> None:
@@ -80,6 +83,7 @@ class FluxTextEncodingStrategy(TextEncodingStrategy):
             t5_attn_mask = None  # caption may be dropped/shuffled, so t5_attn_mask should not be used to make sure the mask is same as the cached one
 
         return [l_pooled, t5_out, txt_ids, t5_attn_mask]  # returns t5_attn_mask for attention mask in transformer
+
 
 class FluxTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
     FLUX_TEXT_ENCODER_OUTPUTS_NPZ_SUFFIX = "_flux_te.npz"
@@ -153,27 +157,56 @@ class FluxTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
         captions = [info.caption for info in infos]
 
         tokens_and_masks = tokenize_strategy.tokenize(captions)
+        
+        # Move models and tokens to the specified device before encoding
+        clip_l, t5xxl = models
+        if clip_l is not None:
+            clip_l.to(device)
+        if t5xxl is not None:
+            t5xxl.to(device)
+
+        l_tokens, t5_tokens = tokens_and_masks[:2]
+        l_tokens = l_tokens.to(device)
+        t5_tokens = t5_tokens.to(device)
+        if len(tokens_and_masks) > 2:
+            t5_attn_mask = tokens_and_masks[2].to(device)
+        else:
+            t5_attn_mask = None
+
+
         with torch.no_grad():
             # attn_mask is applied in text_encoding_strategy.encode_tokens if apply_t5_attn_mask is True
-            l_pooled, t5_out, txt_ids, _ = flux_text_encoding_strategy.encode_tokens(tokenize_strategy, models, tokens_and_masks)
+            l_pooled, t5_out, txt_ids, _ = flux_text_encoding_strategy.encode_tokens(tokenize_strategy, models, [l_tokens, t5_tokens, t5_attn_mask])
 
-        if l_pooled.dtype == torch.bfloat16:
+        # Move the results back to CPU before saving to numpy arrays
+        if l_pooled is not None:
+            l_pooled = l_pooled.cpu()
+        if t5_out is not None:
+            t5_out = t5_out.cpu()
+        if txt_ids is not None:
+            txt_ids = txt_ids.cpu()
+        if t5_attn_mask is not None:
+            t5_attn_mask = t5_attn_mask.cpu()
+
+         # Convert to float32 before converting to NumPy arrays
+        if l_pooled is not None and l_pooled.dtype == torch.bfloat16:
             l_pooled = l_pooled.float()
-        if t5_out.dtype == torch.bfloat16:
+        if t5_out is not None and t5_out.dtype == torch.bfloat16:
             t5_out = t5_out.float()
-        if txt_ids.dtype == torch.bfloat16:
+        if txt_ids is not None and txt_ids.dtype == torch.bfloat16:
             txt_ids = txt_ids.float()
 
-        l_pooled = l_pooled.cpu().numpy()
-        t5_out = t5_out.cpu().numpy()
-        txt_ids = txt_ids.cpu().numpy()
-        t5_attn_mask = tokens_and_masks[2].cpu().numpy()
+
+        l_pooled = l_pooled.numpy() if l_pooled is not None else None
+        t5_out = t5_out.numpy() if t5_out is not None else None
+        txt_ids = txt_ids.numpy() if txt_ids is not None else None
+        t5_attn_mask = t5_attn_mask.numpy() if t5_attn_mask is not None else None
 
         for i, info in enumerate(infos):
-            l_pooled_i = l_pooled[i]
-            t5_out_i = t5_out[i]
-            txt_ids_i = txt_ids[i]
-            t5_attn_mask_i = t5_attn_mask[i]
+            l_pooled_i = l_pooled[i] if l_pooled is not None else None
+            t5_out_i = t5_out[i] if t5_out is not None else None
+            txt_ids_i = txt_ids[i] if txt_ids is not None else None
+            t5_attn_mask_i = t5_attn_mask[i] if t5_attn_mask is not None else None
             apply_t5_attn_mask_i = self.apply_t5_attn_mask
 
             if self.cache_to_disk:
@@ -215,8 +248,8 @@ class FluxLatentsCachingStrategy(LatentsCachingStrategy):
         return self._default_load_latents_from_disk(8, npz_path, bucket_reso)  # support multi-resolution
 
     # TODO remove circular dependency for ImageInfo
-    def cache_batch_latents(self, vae, image_infos: List, flip_aug: bool, alpha_mask: bool, random_crop: bool, device):
-        encode_by_vae = lambda img_tensor: vae.encode(img_tensor.to(device, dtype=vae.dtype)).to("cpu") # modified encode_by_vae to use device
+    def cache_batch_latents(self, vae, image_infos: List, flip_aug: bool, alpha_mask: bool, random_crop: bool, device: torch.device):
+        encode_by_vae = lambda img_tensor: vae.encode(img_tensor.to(device, dtype=vae.dtype)).to("cpu")
         vae_device = vae.device
         vae_dtype = vae.dtype
 
