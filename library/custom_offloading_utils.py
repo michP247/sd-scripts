@@ -85,13 +85,25 @@ def parameters_to_device(layer, device):
     for name, param in layer.named_parameters():
         if param.data.device != device:
             print(f"Moving parameter '{name}' to {device}")
-            param.data = param.data.to(device)
+            # Cast to bfloat16 if full_bf16 is enabled
+            param.data = param.data.detach().to(device).bfloat16()
+
+            print(f"  New device: {param.data.device}")
+            print(f"  New dtype: {param.data.dtype}")
+        else:
+            print(f"  Parameter '{name}' is already on {device}")
 
 def buffers_to_device(layer, device):
     for name, buffer in layer.named_buffers():
         if buffer.data.device != device:
             print(f"Moving buffer '{name}' to {device}")
-            buffer.data = buffer.data.to(device)
+            # Cast to bfloat16 if full_bf16 is enabled
+            buffer.data = buffer.data.detach().to(device).bfloat16()
+
+            print(f"  New device: {buffer.data.device}")
+            print(f"  New dtype: {buffer.data.dtype}")
+        else:
+            print(f"  Buffer '{name}' is already on {device}")
 
 class Offloader:
     """
