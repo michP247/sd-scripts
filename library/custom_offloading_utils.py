@@ -224,9 +224,15 @@ class ModelOffloader(Offloader):
         self._wait_blocks_move(block_idx)
 
     def move_to_device_for_block(self, block: nn.Module, device: torch.device):
-        if block.weight.device != device:
-            print(f"Moving block of type {block.__class__.__name__} to {device}")
-            block.to(device)
+        # Check if the block has any parameters before attempting to access .weight
+        if any(p.requires_grad for p in block.parameters()):
+            # Find the first parameter and check its device
+            first_param = next((p for p in block.parameters()), None)
+            if first_param is not None and first_param.device != device:
+                print(f"Moving block of type {block.__class__.__name__} to {device}")
+                block.to(device)
+        else:
+            print(f"Block of type {block.__class__.__name__} has no parameters to move.")
 
     def prepare_block_devices_before_forward(self, blocks: list[nn.Module]):
         if self.blocks_to_swap is None or self.blocks_to_swap == 0:
