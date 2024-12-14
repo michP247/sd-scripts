@@ -289,6 +289,9 @@ def train(args):
     if args.gradient_checkpointing:
         flux.enable_gradient_checkpointing(cpu_offload=args.cpu_offload_checkpointing)
 
+    # Move the model to the XLA device before any offloading
+    flux.to(device) 
+    
     flux.requires_grad_(True)
 
     # block swap
@@ -466,13 +469,12 @@ def train(args):
     if args.deepspeed:
         raise ValueError("Deepspeed is not supported for XLA, use native XLA implementation instead.")
     else:
-        # accelerator does some magic 
+        # if we are swapping blocks, move only necessary parts to device
         if is_swapping_blocks:
             flux.move_to_device_except_swap_blocks(device)  # reduce peak memory usage
-        # optimizer, train_dataloader, lr_scheduler = accelerator.prepare(optimizer, train_dataloader, lr_scheduler) # removed accelerate. no need to prepare the data loader, the MpDeviceLoader takes care of it.
         else:
-            # if we doesn't swap blocks, we can move the model to device
-            flux.to(device)
+            flux.to(device) # Move the entire model to the device only if not block swapping
+
 
 
     # resumeする
