@@ -85,25 +85,27 @@ def parameters_to_device(layer, device):
     for name, param in layer.named_parameters():
         if param.data.device != device:
             print(f"Moving parameter '{name}' to {device}")
-            # Cast to bfloat16 if full_bf16 is enabled
-            param.data = param.data.detach().to(device).bfloat16()
+            # Create a new tensor on the target device with bfloat16 dtype
+            new_param = torch.empty_like(param.data, device=device, dtype=torch.bfloat16)
+            new_param.copy_(param.data)
+            param.data = new_param
 
             print(f"  New device: {param.data.device}")
             print(f"  New dtype: {param.data.dtype}")
-        else:
-            print(f"  Parameter '{name}' is already on {device}")
 
 def buffers_to_device(layer, device):
     for name, buffer in layer.named_buffers():
         if buffer.data.device != device:
             print(f"Moving buffer '{name}' to {device}")
-            # Cast to bfloat16 if full_bf16 is enabled
-            buffer.data = buffer.data.detach().to(device).bfloat16()
-
+            # Create a new tensor on the target device with bfloat16 dtype
+            new_buffer = torch.empty_like(buffer.data, device=device, dtype=torch.bfloat16)
+            new_buffer.copy_(buffer.data)
+            buffer.data = new_buffer
+            
             print(f"  New device: {buffer.data.device}")
             print(f"  New dtype: {buffer.data.dtype}")
         else:
-            print(f"  Buffer '{name}' is already on {device}")
+             print(f"  Buffer '{name}' is already on {device}")
 
 class Offloader:
     """
