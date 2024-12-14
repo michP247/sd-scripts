@@ -15,10 +15,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 CLIP_L_TOKENIZER_ID = "openai/clip-vit-large-patch14"
 T5_XXL_TOKENIZER_ID = "google/t5-v1_1-xxl"
-
 
 class FluxTokenizeStrategy(TokenizeStrategy):
     def __init__(self, t5xxl_max_length: int = 512, tokenizer_cache_dir: Optional[str] = None) -> None:
@@ -37,7 +35,6 @@ class FluxTokenizeStrategy(TokenizeStrategy):
         t5_tokens = t5_tokens["input_ids"]
 
         return [l_tokens, t5_tokens, t5_attn_mask]
-
 
 class FluxTextEncodingStrategy(TextEncodingStrategy):
     def __init__(self, apply_t5_attn_mask: Optional[bool] = None) -> None:
@@ -83,7 +80,6 @@ class FluxTextEncodingStrategy(TextEncodingStrategy):
             t5_attn_mask = None  # caption may be dropped/shuffled, so t5_attn_mask should not be used to make sure the mask is same as the cached one
 
         return [l_pooled, t5_out, txt_ids, t5_attn_mask]  # returns t5_attn_mask for attention mask in transformer
-
 
 class FluxTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
     FLUX_TEXT_ENCODER_OUTPUTS_NPZ_SUFFIX = "_flux_te.npz"
@@ -143,7 +139,7 @@ class FluxTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
         return [l_pooled, t5_out, txt_ids, t5_attn_mask]
 
     def cache_batch_outputs(
-        self, tokenize_strategy: TokenizeStrategy, models: List[Any], text_encoding_strategy: TextEncodingStrategy, infos: List
+        self, tokenize_strategy: TokenizeStrategy, models: List[Any], text_encoding_strategy: TextEncodingStrategy, infos: List, device: torch.device
     ):
         if not self.warn_fp8_weights:
             if flux_utils.get_t5xxl_actual_dtype(models[1]) == torch.float8_e4m3fn:
@@ -193,7 +189,6 @@ class FluxTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
                 # it's fine that attn mask is not None. it's overwritten before calling the model if necessary
                 info.text_encoder_outputs = (l_pooled_i, t5_out_i, txt_ids_i, t5_attn_mask_i)
 
-
 class FluxLatentsCachingStrategy(LatentsCachingStrategy):
     FLUX_LATENTS_NPZ_SUFFIX = "_flux.npz"
 
@@ -220,8 +215,8 @@ class FluxLatentsCachingStrategy(LatentsCachingStrategy):
         return self._default_load_latents_from_disk(8, npz_path, bucket_reso)  # support multi-resolution
 
     # TODO remove circular dependency for ImageInfo
-    def cache_batch_latents(self, vae, image_infos: List, flip_aug: bool, alpha_mask: bool, random_crop: bool):
-        encode_by_vae = lambda img_tensor: vae.encode(img_tensor).to("cpu")
+    def cache_batch_latents(self, vae, image_infos: List, flip_aug: bool, alpha_mask: bool, random_crop: bool, device):
+        encode_by_vae = lambda img_tensor: vae.encode(img_tensor.to(device, dtype=vae.dtype)).to("cpu") # modified encode_by_vae to use device
         vae_device = vae.device
         vae_dtype = vae.dtype
 
@@ -231,7 +226,6 @@ class FluxLatentsCachingStrategy(LatentsCachingStrategy):
 
         if not train_util.HIGH_VRAM:
             train_util.clean_memory_on_device(vae.device)
-
 
 if __name__ == "__main__":
     # test code for FluxTokenizeStrategy
