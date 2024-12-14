@@ -19,6 +19,7 @@ import time
 from typing import List, Optional, Tuple, Union
 import toml
 import wandb
+import bitsandbytes as bnb
 
 from tqdm import tqdm
 
@@ -51,11 +52,13 @@ from library.config_util import (
 )
 from library.custom_train_functions import apply_masked_loss, add_custom_train_arguments
 
+import torch
+import torch.nn as nn
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
-import torch_xla.distributed.xla_backend
-#import torch_xla.optim as xoptim
-import torch_xla.utils.serialization as xser
+import torch_xla.utils.utils as xu
+import torch_xla.distributed.xla_multiprocessing as xmp
+import torch_xla.optimizers as xoptim
 
 
 def train(args):
@@ -392,8 +395,22 @@ def train(args):
         optimizer_train_fn = lambda: None  # dummy function
         optimizer_eval_fn = lambda: None  # dummy function
     else:
-        #_, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
-        optimizer = xm.Adam(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr']) # Use Adam directly from torch_xla.core.xla_model
+        if args.optimizer_type.lower() == "Adafactor":
+            # Use xoptim.Adafactor for XLA compatibility
+            optimizer = xoptim.Adafactor(
+                params_to_optimize[0]['params'],
+                lr=params_to_optimize[0]['lr'],
+                scale_parameter=args.optimizer_args[0].split('=')[1].lower() == 'true',  # Extract from optimizer_args
+                relative_step=args.optimizer_args[1].split('=')[1].lower() == 'true',  # Extract from optimizer_args
+                warmup_init=args.optimizer_args[2].split('=')[1].lower() == 'true',  # Extract from optimizer_args
+                weight_decay=float(args.optimizer_args[3].split('=')[1]),  # Extract from optimizer_args
+            )
+            logger.info("Using Adafactor optimizer from torch_xla.optimizers")
+        else:
+            # Use torch.optim.AdamW with XLA optimizations
+            optimizer = xoptim.AdamW(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr'])
+            logger.info("Using AdamW optimizer from torch_xla.optimizers")
+
         optimizer_train_fn, optimizer_eval_fn = train_util.get_optimizer_train_eval_fn(optimizer, args)
 
     # prepare dataloader
