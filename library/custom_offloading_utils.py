@@ -84,11 +84,11 @@ def swap_weight_devices_no_cuda(device: torch.device, layer_to_cpu: nn.Module, l
 def weighs_to_device(layer: nn.Module, device: torch.device):
     for module in layer.modules():
         if hasattr(module, "weight") and module.weight is not None:
-            print(f"  Old device: {module.data.device}")
+            print(f"  Old device: {module.weight.data.device}")
             print(f"Moving module '{module}' to {device}")
             module.weight.data = module.weight.data.to(device, non_blocking=True)
-            print(f"  New device: {module.data.device}")
-            print(f"  New dtype: {module.data.dtype}")
+            print(f"  New device: {module.weight.data.device}")
+            print(f"  New dtype: {module.weight.data.dtype}")
 
 class Offloader:
     """
