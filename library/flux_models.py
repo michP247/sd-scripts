@@ -880,7 +880,7 @@ class Flux(nn.Module):
     Transformer model for flow matching on sequences.
     """
 
-    def __init__(self, params: FluxParams):
+    def __init__(self, params: FluxParams, device: Union[str, torch.device] = "cpu"):
         super().__init__()
 
         self.params = params
@@ -929,6 +929,22 @@ class Flux(nn.Module):
         self.offloader_single = None
         self.num_double_blocks = len(self.double_blocks)
         self.num_single_blocks = len(self.single_blocks)
+
+        # Initialize all sub-modules on the CPU to avoid immediately placing them on the device
+        self.pe_embedder.to("cpu")
+        self.img_in.to("cpu")
+        self.time_in.to("cpu")
+        self.vector_in.to("cpu")
+        if self.params.guidance_embed:
+            self.guidance_in.to("cpu")
+        self.txt_in.to("cpu")
+
+        for block in self.double_blocks:
+            block.to("cpu")
+        for block in self.single_blocks:
+            block.to("cpu")
+
+        self.final_layer.to("cpu")
 
     @property
     def device(self):
@@ -982,24 +998,50 @@ class Flux(nn.Module):
         self.offloader_single = custom_offloading_utils.ModelOffloader(
             self.single_blocks, self.num_single_blocks, single_blocks_to_swap, device, debug=False
         )
-        self.device = device
+        self.device = device # Add this line to update the device attribute
         print(
             f"FLUX: Block swap enabled. Swapping {blocks_to_swap} blocks, double blocks: {double_blocks_to_swap}, single blocks: {single_blocks_to_swap}."
         )
 
     def move_to_device_except_swap_blocks(self, device: torch.device):
-        # assume model is on cpu. do not move blocks to device to reduce temporary memory usage
-        if self.blocks_to_swap:
-            save_double_blocks = self.double_blocks
-            save_single_blocks = self.single_blocks
-            self.double_blocks = None
-            self.single_blocks = None
+        # Move the main parts of the model to the device
+        self.pe_embedder.to(device)
+        self.img_in.to(device)
+        self.time_in.to(device)
+        self.vector_in.to(device)
+        if self.params.guidance_embed:
+            self.guidance_in.to(device)
+        self.txt_in.to(device)
+        self.final_layer.to(device)
 
-        self.to(device)
-
+        # Handle the blocks that will be swapped
         if self.blocks_to_swap:
-            self.double_blocks = save_double_blocks
-            self.single_blocks = save_single_blocks
+            # Ensure the blocks that will be swapped are on the CPU initially
+            for block in self.double_blocks:
+                weighs_to_device(block, "cpu")
+            for block in self.single_blocks:
+                weighs_to_device(block, "cpu")
+
+            # Move only the necessary blocks to the device
+            num_blocks_to_load = self.num_double_blocks - self.blocks_to_swap // 2
+            for i in range(num_blocks_to_load):
+                self.double_blocks[i].to(device)
+
+            num_single_blocks_to_load = self.num_single_blocks - (self.blocks_to_swap - self.blocks_to_swap // 2) * 2
+            for i in range(num_single_blocks_to_load):
+                self.single_blocks[i].to(device)
+
+            # Initialize offloaders if not already initialized
+            if self.offloader_double is None:
+                self.offloader_double = custom_offloading_utils.ModelOffloader(
+                    self.double_blocks, self.num_double_blocks, self.blocks_to_swap // 2, device, debug=True
+                )
+            if self.offloader_single is None:
+                self.offloader_single = custom_offloading_utils.ModelOffloader(
+                    self.single_blocks, self.num_single_blocks, (self.blocks_to_swap - self.blocks_to_swap // 2) * 2, device, debug=False
+                )
+
+            self.device = device # Add this line to update the device attribute
 
     def prepare_block_swap_before_forward(self):
         if self.blocks_to_swap is None or self.blocks_to_swap == 0:

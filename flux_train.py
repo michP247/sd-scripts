@@ -283,7 +283,7 @@ def train(args):
 
     # load FLUX
     _, flux = flux_utils.load_flow_model(
-        args.pretrained_model_name_or_path, weight_dtype, "cpu", args.disable_mmap_load_safetensors
+        args.pretrained_model_name_or_path, weight_dtype, device, args.disable_mmap_load_safetensors
     )
 
     # Do not call flux.to(device) here
@@ -313,10 +313,9 @@ def train(args):
 
     is_swapping_blocks = args.blocks_to_swap is not None and args.blocks_to_swap > 0
     if is_swapping_blocks:
-        # Swap blocks between CPU and GPU to reduce memory usage, in forward and backward passes.
-        # This idea is based on 2kpr's great work. Thank you!
         logger.info(f"enable block swap: blocks_to_swap={args.blocks_to_swap}")
         flux.enable_block_swap(args.blocks_to_swap, device)
+        flux.move_to_device_except_swap_blocks(device)
 
     if not cache_latents:
         # load VAE here if not cached
@@ -481,18 +480,18 @@ def train(args):
 
     # Resume Checkpoint logic here
     if args.resume is not None:
-      if os.path.isfile(args.resume):
-        logger.info(f"Resuming from checkpoint: {args.resume}")
-        checkpoint = torch.load(args.resume, map_location='cpu')
-        flux.load_state_dict(checkpoint['model'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
+        if os.path.isfile(args.resume):
+            logger.info(f"Resuming from checkpoint: {args.resume}")
+            checkpoint = torch.load(args.resume, map_location='cpu')
+            flux.load_state_dict(checkpoint['model'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
         if 'lr_scheduler' in checkpoint:
-          lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
         global_step = checkpoint.get('global_step', 0)
         epoch = checkpoint.get('epoch', 0)
         current_step.value = global_step
         current_epoch.value = epoch
-      else:
+    else:
         logger.warning(f"Checkpoint {args.resume} not found, skipping resume")
 
     if args.fused_backward_pass:

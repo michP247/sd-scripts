@@ -5376,7 +5376,7 @@ def _load_target_model(args: argparse.Namespace, weight_dtype, device="cpu", une
     return text_encoder, vae, unet, load_stable_diffusion_format
 
 
-def load_target_model(args, weight_dtype, accelerator, unet_use_linear_projection_in_v2=False):
+def load_target_model(args, weight_dtype, device, unet_use_linear_projection_in_v2=False): # add device parameter
     for pi in range(xm.xrt_world_size()): # changed to xla_world_size
         if pi == xm.get_ordinal(): #changed to xla_ordinal
             logger.info(f"loading model for process {xm.get_ordinal()}/{xm.xrt_world_size()}") #changed to xla ordinal/xla_world_size
@@ -5384,17 +5384,17 @@ def load_target_model(args, weight_dtype, accelerator, unet_use_linear_projectio
             text_encoder, vae, unet, load_stable_diffusion_format = _load_target_model(
                 args,
                 weight_dtype,
-                xm.xla_device() if args.lowram else "cpu",
+                "cpu", # load to cpu first
                 unet_use_linear_projection_in_v2=unet_use_linear_projection_in_v2,
             )
             # work on low-ram device
             if args.lowram:
-                text_encoder.to(xm.xla_device()) # changed to xla device
-                unet.to(xm.xla_device())
-                vae.to(xm.xla_device()) # changed to xla device
+                text_encoder.to(device) # changed to xla device
+                unet.to(device)
+                vae.to(device) # changed to xla device
 
-            clean_memory_on_device(xm.xla_device()) # changed to xla device
-        xm.rendezvous() # replace accelerator.wait_for_everyone()
+            clean_memory_on_device(device) # changed to xla device
+        xm.rendezvous("load-target-model") # replace accelerator.wait_for_everyone()
     return text_encoder, vae, unet, load_stable_diffusion_format
 
 
