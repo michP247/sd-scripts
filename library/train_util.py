@@ -1124,7 +1124,7 @@ class BaseDataset(torch.utils.data.Dataset):
                 # if batch is not empty and condition is changed, flush the batch. Note that current_condition is not None if batch is not empty
                 condition = Condition(info.bucket_reso, subset.flip_aug, subset.alpha_mask, subset.random_crop)
                 if len(batch) > 0 and current_condition != condition:
-                    submit_batch(batch, current_condition)
+                    submit_batch(batch, current_condition, device) # add device argument
                     batch = []
 
                 if info.image is None:
@@ -1136,12 +1136,12 @@ class BaseDataset(torch.utils.data.Dataset):
 
                 # if number of data in batch is enough, flush the batch
                 if len(batch) >= caching_strategy.batch_size:
-                    submit_batch(batch, current_condition)
+                    submit_batch(batch, current_condition, device) # add device argument
                     batch = []
                     current_condition = None
 
             if len(batch) > 0:
-                submit_batch(batch, current_condition)
+                submit_batch(batch, current_condition, device) # add device argument
 
         finally:
             executor.shutdown()
