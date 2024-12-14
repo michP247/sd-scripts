@@ -249,8 +249,9 @@ class FluxLatentsCachingStrategy(LatentsCachingStrategy):
 
     # TODO remove circular dependency for ImageInfo
     def cache_batch_latents(self, vae, image_infos: List, flip_aug: bool, alpha_mask: bool, random_crop: bool, device: torch.device):
-        encode_by_vae = lambda img_tensor: vae.encode(img_tensor.to(device, dtype=vae.dtype)).to("cpu")
-        vae_device = vae.device
+        # Correctly pass the device to the lambda function
+        encode_by_vae = lambda img_tensor: vae.encode(img_tensor.to(device, dtype=vae.dtype)).latent_dist.sample().cpu() # Moved to device
+        vae_device = device  # Use the passed device
         vae_dtype = vae.dtype
 
         self._default_cache_batch_latents(
