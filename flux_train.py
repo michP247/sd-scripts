@@ -204,7 +204,8 @@ def train(args):
     # load VAE for caching latents
     ae = None
     if cache_latents:
-        ae = flux_utils.load_ae(args.ae, weight_dtype, "cpu", args.disable_mmap_load_safetensors)
+        #ae = flux_utils.load_ae(args.ae, weight_dtype, "cpu", args.disable_mmap_load_safetensors)
+        ae = flux_utils.load_ae(args.ae, weight_dtype, device)
         ae.to(device, dtype=weight_dtype)
         ae.requires_grad_(False)
         ae.eval()
