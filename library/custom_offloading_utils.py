@@ -60,11 +60,10 @@ def swap_weight_devices_no_cuda(device: torch.device, layer_to_cpu: nn.Module, l
 
     synchronize_device(device)
 
-    # Transfer weights from CPU to device
+    # Transfer weights from CPU to device (synchronous)
     for module_to_cpu, module_to_device in zip(layer_to_cpu.modules(), layer_to_device.modules()):
         if hasattr(module_to_device, "weight") and module_to_device.weight is not None:
-            # Transfer the weights from the now CPU-resident module to the device
-            module_to_device.weight = nn.Parameter(module_to_cpu.weight.to(device, non_blocking=True))
+            module_to_device.weight = nn.Parameter(module_to_cpu.weight.to(device, non_blocking=False))  # Removed non_blocking
 
     synchronize_device(device)
 
@@ -130,6 +129,8 @@ class Offloader:
             print(f"Move block {bidx_to_cpu} to CPU and block {bidx_to_cuda} to {'CUDA' if self.cuda_available else 'device'}")
             self.swap_weight_devices(block_to_cpu, block_to_cuda)
 
+            xm.mark_step()
+
             if self.debug:
                 print(f"Moved blocks {bidx_to_cpu} and {bidx_to_cuda} in {time.perf_counter()-start_time:.2f}s")
                 print_memory_usage(self.device)
@@ -152,6 +153,8 @@ class Offloader:
             print(f"Wait for block {block_idx}")
 
         _, bidx_to_cuda = future.result()
+
+        xm.mark_step()
 
         assert block_idx == bidx_to_cuda, f"Block index mismatch: {block_idx} != {bidx_to_cuda}"
 
