@@ -312,4 +312,5 @@ class ModelOffloader(Offloader):
             return
         block_idx_to_cpu = block_idx
         block_idx_to_cuda = self.num_blocks - self.blocks_to_swap + block_idx
-        self._submit_move_blocks(blocks, block_idx_to_cpu, block_idx_to_cuda)
+        block_to_cuda = blocks[block_idx_to_cuda]  # Get the block to be moved to CUDA
+        self._submit_move_blocks(block_idx_to_cpu, blocks[block_idx_to_cpu], block_idx_to_cuda, block_to_cuda)
