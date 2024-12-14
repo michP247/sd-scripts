@@ -966,22 +966,23 @@ class Flux(nn.Module):
 
         print("FLUX: Gradient checkpointing disabled.")
 
-    def enable_block_swap(self, num_blocks: int, device: torch.device):
-        self.blocks_to_swap = num_blocks
+    def enable_block_swap(self, blocks_to_swap: int, device: torch.device):
+        self.blocks_to_swap = blocks_to_swap
         double_blocks_to_swap = num_blocks // 2
         single_blocks_to_swap = (num_blocks - double_blocks_to_swap) * 2
 
-        assert double_blocks_to_swap <= self.num_double_blocks - 2 and single_blocks_to_swap <= self.num_single_blocks - 2, (
-            f"Cannot swap more than {self.num_double_blocks - 2} double blocks and {self.num_single_blocks - 2} single blocks. "
+        assert double_blocks_to_swap <= self.num_double_blocks - 1 and single_blocks_to_swap <= self.num_single_blocks - 1, (
+            f"Cannot swap more than {self.num_double_blocks - 1} double blocks and {self.num_single_blocks - 1} single blocks. "
             f"Requested {double_blocks_to_swap} double blocks and {single_blocks_to_swap} single blocks."
         )
 
         self.offloader_double = custom_offloading_utils.ModelOffloader(
-            self.double_blocks, self.num_double_blocks, double_blocks_to_swap, device  # , debug=True
+            self.double_blocks, self.num_double_blocks, double_blocks_to_swap, device, debug=True
         )
         self.offloader_single = custom_offloading_utils.ModelOffloader(
-            self.single_blocks, self.num_single_blocks, single_blocks_to_swap, device  # , debug=True
+            self.single_blocks, self.num_single_blocks, single_blocks_to_swap, device, debug=False
         )
+        self.device = device
         print(
             f"FLUX: Block swap enabled. Swapping {num_blocks} blocks, double blocks: {double_blocks_to_swap}, single blocks: {single_blocks_to_swap}."
         )
@@ -1052,7 +1053,9 @@ class Flux(nn.Module):
                     img = img + block_controlnet_single_hidden_states[block_idx % controlnet_single_depth]
         else:
             for block_idx, block in enumerate(self.double_blocks):
-                self.offloader_double.wait_for_block(block_idx)
+                # Move the necessary blocks to the device just before they are used
+                self.offloader_double.prepare_for_block(block_idx)
+                self.offloader_double.move_to_device_for_block(block, self.device)
 
                 img, txt = block(img=img, txt=txt, vec=vec, pe=pe, txt_attention_mask=txt_attention_mask)
                 if block_controlnet_hidden_states is not None and controlnet_depth > 0:
@@ -1063,7 +1066,9 @@ class Flux(nn.Module):
             img = torch.cat((txt, img), 1)
 
             for block_idx, block in enumerate(self.single_blocks):
-                self.offloader_single.wait_for_block(block_idx)
+                # Move the necessary single block to the device just before it is used
+                self.offloader_single.prepare_for_block(block_idx)
+                self.offloader_single.move_to_device_for_block(block, self.device)
 
                 img = block(img, vec=vec, pe=pe, txt_attention_mask=txt_attention_mask)
                 if block_controlnet_single_hidden_states is not None and controlnet_single_depth > 0:
@@ -1072,10 +1077,6 @@ class Flux(nn.Module):
                 self.offloader_single.submit_move_blocks(self.single_blocks, block_idx)
 
         img = img[:, txt.shape[1] :, ...]
-
-        if self.training and self.cpu_offload_checkpointing:
-            img = img.to(self.device)
-            vec = vec.to(self.device)
 
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
 

@@ -169,6 +169,10 @@ class ModelOffloader(Offloader):
                 handle = block.register_full_backward_hook(hook)
                 self.remove_handles.append(handle)
 
+    # Add this new method
+    def move_to_device_for_block(self, block: nn.Module, device: torch.device):
+        block.to(device)
+
     def __del__(self):
         for handle in self.remove_handles:
             handle.remove()
@@ -184,7 +188,7 @@ class ModelOffloader(Offloader):
 
         # create  hook
         block_idx_to_cpu = self.num_blocks - num_blocks_propagated
-        block_idx_to_cuda = self.blocks_to_swap - num_blocks_propagated
+        block_idx_to_cuda = self.blocks_to_swap - num_blocks_propagated -1 # this is the correction
         block_idx_to_wait = block_index - 1
 
         def backward_hook(module, grad_input, grad_output):
@@ -198,6 +202,28 @@ class ModelOffloader(Offloader):
             return None
 
         return backward_hook
+
+    # add this new method
+    def prepare_for_block(self, block_idx: int):
+        if self.blocks_to_swap is None or self.blocks_to_swap == 0:
+            return
+        if block_idx < self.num_blocks - self.blocks_to_swap:
+            return
+        self._wait_blocks_move(block_idx)
+
+    def wait_for_block(self, block_idx: int):
+        if self.blocks_to_swap is None or self.blocks_to_swap == 0:
+            return
+        self._wait_blocks_move(block_idx)
+
+    def submit_move_blocks(self, blocks: list[nn.Module], block_idx: int):
+        if self.blocks_to_swap is None or self.blocks_to_swap == 0:
+            return
+        if block_idx >= self.blocks_to_swap:
+            return
+        block_idx_to_cpu = block_idx
+        block_idx_to_cuda = self.num_blocks - self.blocks_to_swap + block_idx
+        self._submit_move_blocks(blocks, block_idx_to_cpu, block_idx_to_cuda)
 
     def prepare_block_devices_before_forward(self, blocks: list[nn.Module]):
         if self.blocks_to_swap is None or self.blocks_to_swap == 0:

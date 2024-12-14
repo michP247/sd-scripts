@@ -283,14 +283,13 @@ def train(args):
 
     # load FLUX
     _, flux = flux_utils.load_flow_model(
-        args.pretrained_model_name_or_path, weight_dtype, "cpu", args.disable_mmap_load_safetensors # pass "cpu" here
+        args.pretrained_model_name_or_path, weight_dtype, "cpu", args.disable_mmap_load_safetensors
     )
-    flux.to(device) # move to device after loading
+
+    # Do not call flux.to(device) here
 
     if args.gradient_checkpointing:
         flux.enable_gradient_checkpointing(cpu_offload=args.cpu_offload_checkpointing)
-
-    # Do not call flux.to(device) here
 
     flux.requires_grad_(True)
 
@@ -468,12 +467,12 @@ def train(args):
 
     if args.deepspeed:
         raise ValueError("Deepspeed is not supported for XLA, use native XLA implementation instead.")
-    else:
+    #else:
         # accelerator does some magic
         # if we doesn't swap blocks, we can move the model to device
         # flux = accelerator.prepare(flux, device_placement=[not is_swapping_blocks]) # removed accelerate
-        if is_swapping_blocks:
-            flux.move_to_device_except_swap_blocks(device)  # reduce peak memory usage
+        #if is_swapping_blocks:
+            #flux.move_to_device_except_swap_blocks(device)  # reduce peak memory usage
 
 
 
