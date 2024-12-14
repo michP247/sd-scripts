@@ -968,8 +968,8 @@ class Flux(nn.Module):
 
     def enable_block_swap(self, blocks_to_swap: int, device: torch.device):
         self.blocks_to_swap = blocks_to_swap
-        double_blocks_to_swap = num_blocks // 2
-        single_blocks_to_swap = (num_blocks - double_blocks_to_swap) * 2
+        double_blocks_to_swap = blocks_to_swap // 2  # Corrected line
+        single_blocks_to_swap = (blocks_to_swap - double_blocks_to_swap) * 2
 
         assert double_blocks_to_swap <= self.num_double_blocks - 1 and single_blocks_to_swap <= self.num_single_blocks - 1, (
             f"Cannot swap more than {self.num_double_blocks - 1} double blocks and {self.num_single_blocks - 1} single blocks. "
@@ -984,7 +984,7 @@ class Flux(nn.Module):
         )
         self.device = device
         print(
-            f"FLUX: Block swap enabled. Swapping {num_blocks} blocks, double blocks: {double_blocks_to_swap}, single blocks: {single_blocks_to_swap}."
+            f"FLUX: Block swap enabled. Swapping {blocks_to_swap} blocks, double blocks: {double_blocks_to_swap}, single blocks: {single_blocks_to_swap}."
         )
 
     def move_to_device_except_swap_blocks(self, device: torch.device):
