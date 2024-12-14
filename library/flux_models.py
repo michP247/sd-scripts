@@ -1021,9 +1021,9 @@ class Flux(nn.Module):
         if self.blocks_to_swap:
             # Ensure the blocks that will be swapped are on the CPU initially
             for block in self.double_blocks:
-                custom_offloading_utils.weighs_to_device(block, "cpu")
+                custom_offloading_utils.weighs_to_device(block, torch.device("cpu")) # change to torch.device("cpu")
             for block in self.single_blocks:
-                custom_offloading_utils.weighs_to_device(block, "cpu")
+                custom_offloading_utils.weighs_to_device(block, torch.device("cpu")) # change to torch.device("cpu")
 
             # Move only the necessary blocks to the device
             num_blocks_to_load = self.num_double_blocks - self.blocks_to_swap // 2
