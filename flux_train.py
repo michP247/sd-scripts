@@ -18,6 +18,7 @@ from multiprocessing import Value
 import time
 from typing import List, Optional, Tuple, Union
 import toml
+import wandb
 
 from tqdm import tqdm
 
@@ -53,7 +54,7 @@ from library.custom_train_functions import apply_masked_loss, add_custom_train_a
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
 import torch_xla.distributed.xla_backend
-# import torch_xla.optim as xoptim # incorrect import removed
+import torch_xla.optim as xoptim
 import torch_xla.utils.serialization as xser
 
 
@@ -210,7 +211,7 @@ def train(args):
 
         ae.to("cpu")  # if no sampling, vae can be deleted
         clean_memory_on_device(device)
-
+        xm.rendezvous()
         # accelerator.wait_for_everyone() # removed accelerate
 
     # prepare tokenize strategy
@@ -270,6 +271,7 @@ def train(args):
                             )
 
         # accelerator.wait_for_everyone() # removed accelerate
+        xm.rendezvous()
 
         # now we can delete Text Encoders to free memory
         clip_l = None
@@ -379,7 +381,7 @@ def train(args):
         optimizers = []
         for group in grouped_params:
             #_, _, optimizer = train_util.get_optimizer(args, trainable_params=[group]) # original optimizer
-            optimizer = xoptim.Adam(group['params'], lr=group['lr'])  # Use Adam directly from torch_xla.core.xla_model
+            optimizer = xm.Adam(group['params'], lr=group['lr']) # Use Adam directly from torch_xla.core.xla_model
             optimizers.append(optimizer)
         optimizer = optimizers[0]  # avoid error in the following code
 
@@ -391,7 +393,7 @@ def train(args):
         optimizer_eval_fn = lambda: None  # dummy function
     else:
         #_, _, optimizer = train_util.get_optimizer(args, trainable_params=params_to_optimize)
-        optimizer = xm.optimizer.Adam(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr'])
+        optimizer = xm.Adam(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr']) # Use Adam directly from torch_xla.core.xla_model
         optimizer_train_fn, optimizer_eval_fn = train_util.get_optimizer_train_eval_fn(optimizer, args)
 
     # prepare dataloader
@@ -589,7 +591,6 @@ def train(args):
         #     config=train_util.get_sanitized_config_or_none(args),
         #     init_kwargs=init_kwargs,
         # ) # removed accelerator, will implement wandb logging manually.
-        import wandb
         wandb.init(
             project="flux-training", #  Replace with your desired project name
             name=args.wandb_run_name if args.wandb_run_name else "flux-training",
@@ -748,6 +749,7 @@ def train(args):
                     # 指定ステップごとにモデルを保存
                     if args.save_every_n_steps is not None and global_step % args.save_every_n_steps == 0:
                         # accelerator.wait_for_everyone() # removed accelerator
+                        xm.rendezvous()
                         # if accelerator.is_main_process: # removed accelerator
                         flux_train_utils.save_flux_model_on_epoch_end_or_stepwise(
                             args,
@@ -783,6 +785,7 @@ def train(args):
 
 
         # accelerator.wait_for_everyone() # removed accelerator. no need for XLA
+        xm.rendezvous()
 
         optimizer_eval_fn()
         if args.save_every_n_epochs is not None:
