@@ -141,18 +141,18 @@ def load_flow_model(
     return is_schnell, model
 
 
-def load_ae(
-    ckpt_path: str, dtype: torch.dtype, device: Union[str, torch.device], disable_mmap: bool = False
-) -> flux_models.AutoEncoder:
+def load_ae(ckpt_path: str, dtype, device) -> flux_models.AutoEncoder:
     logger.info("Building AutoEncoder")
-    # with torch.device("meta"): # removed meta device
-    # dev and schnell have the same AE params
-    ae = flux_models.AutoEncoder(flux_models.configs[MODEL_NAME_DEV].ae_params).to(dtype).to(device)
+    ae = flux_models.AutoEncoder(flux_models.configs[MODEL_NAME_DEV].ae_params)
 
     logger.info(f"Loading state dict from {ckpt_path}")
-    sd = load_safetensors(ckpt_path, device=str(device), disable_mmap=disable_mmap, dtype=dtype)
+    sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=False, dtype=None)
     info = ae.load_state_dict(sd, strict=False, assign=True)
     logger.info(f"Loaded AE: {info}")
+
+    # Move the model to the device and cast to dtype after loading
+    ae.to(device=device, dtype=dtype)
+    ae.eval() # Set to eval mode
     return ae
 
 
