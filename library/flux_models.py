@@ -930,7 +930,6 @@ class Flux(nn.Module):
         self.num_double_blocks = len(self.double_blocks)
         self.num_single_blocks = len(self.single_blocks)
 
-        self.device = device # Added initial device attribute
          # Initialize all sub-modules on the CPU to avoid immediately placing them on the device
         self.pe_embedder.to("cpu")
         self.img_in.to("cpu")
@@ -1002,8 +1001,7 @@ class Flux(nn.Module):
         self.offloader_single = custom_offloading_utils.ModelOffloader(
             self.single_blocks, self.num_single_blocks, single_blocks_to_swap, device, debug=False
         )
-        # self.device = device # Removed this line
-
+        # removed self.device = device
         print(
             f"FLUX: Block swap enabled. Swapping {blocks_to_swap} blocks, double blocks: {double_blocks_to_swap}, single blocks: {single_blocks_to_swap}."
         )
@@ -1026,7 +1024,7 @@ class Flux(nn.Module):
                 weighs_to_device(block, "cpu")
             for block in self.single_blocks:
                 weighs_to_device(block, "cpu")
-            
+
             # Move only the necessary blocks to the device
             num_blocks_to_load = self.num_double_blocks - self.blocks_to_swap // 2
             for i in range(num_blocks_to_load):
