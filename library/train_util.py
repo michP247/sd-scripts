@@ -1089,9 +1089,8 @@ class BaseDataset(torch.utils.data.Dataset):
                 info.image = None
 
         # define ThreadPoolExecutor to load images in parallel
-        max_workers = min(os.cpu_count(), len(image_infos))
-        max_workers = max(1, max_workers // num_processes)  # consider multi-gpu
-        max_workers = min(max_workers, caching_strategy.batch_size)  # max_workers should be less than batch_size
+        max_workers = min(os.cpu_count(), len(image_infos), caching_strategy.batch_size) # use min
+        max_workers = max(1, max_workers)  # consider multi-gpu # remove integer division
         executor = ThreadPoolExecutor(max_workers)
 
         try:
