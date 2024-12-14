@@ -92,7 +92,7 @@ def analyze_checkpoint_state(ckpt_path: str) -> Tuple[bool, bool, Tuple[int, int
 
 
 def load_flow_model(
-    ckpt_path: str, dtype: Optional[torch.dtype], device: torch.device, disable_mmap: bool = False
+    ckpt_path: str, dtype: Optional[torch.dtype], device: Union[str, torch.device], disable_mmap: bool = False
 ) -> Tuple[bool, flux_models.Flux]:
     is_diffusers, is_schnell, (num_double_blocks, num_single_blocks), ckpt_paths = analyze_checkpoint_state(ckpt_path)
     name = MODEL_NAME_DEV if not is_schnell else MODEL_NAME_SCHNELL
@@ -110,7 +110,7 @@ def load_flow_model(
         logger.info(f"Setting the number of single blocks from {params.depth_single_blocks} to {num_single_blocks}")
         params = replace(params, depth_single_blocks=num_single_blocks)
 
-    # Create model directly on the XLA device but with CPU weights
+    # Create model on the CPU
     model = flux_models.Flux(params).to("cpu")
     model.to(dtype) # Cast the model to the correct dtype while it is still on the CPU
 
@@ -143,8 +143,7 @@ def load_flow_model(
     info = model.load_state_dict(sd, strict=False, assign=True)
     logger.info(f"Loaded Flux: {info}")
 
-    # Move the model to the device after loading weights on CPU
-    model.to(device)
+    # Do not move to device here
 
     return is_schnell, model
 

@@ -283,11 +283,14 @@ def train(args):
 
     # load FLUX
     _, flux = flux_utils.load_flow_model(
-        args.pretrained_model_name_or_path, weight_dtype, device, args.disable_mmap_load_safetensors # change cpu to device
+        args.pretrained_model_name_or_path, weight_dtype, "cpu", args.disable_mmap_load_safetensors # pass "cpu" here
     )
+    flux.to(device) # move to device after loading
 
     if args.gradient_checkpointing:
         flux.enable_gradient_checkpointing(cpu_offload=args.cpu_offload_checkpointing)
+
+    # Do not call flux.to(device) here
 
     flux.requires_grad_(True)
 
