@@ -54,7 +54,7 @@ from library.custom_train_functions import apply_masked_loss, add_custom_train_a
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
 import torch_xla.distributed.xla_backend
-import torch_xla.optim as xoptim
+#import torch_xla.optim as xoptim
 import torch_xla.utils.serialization as xser
 
 
