@@ -466,19 +466,14 @@ def train(args):
     if args.deepspeed:
         raise ValueError("Deepspeed is not supported for XLA, use native XLA implementation instead.")
     else:
-        # accelerator does some magic
-        # if we doesn't swap blocks, we can move the model to device
-        flux.to(device)
+        # accelerator does some magic 
         if is_swapping_blocks:
             flux.move_to_device_except_swap_blocks(device)  # reduce peak memory usage
         # optimizer, train_dataloader, lr_scheduler = accelerator.prepare(optimizer, train_dataloader, lr_scheduler) # removed accelerate. no need to prepare the data loader, the MpDeviceLoader takes care of it.
+        else:
+            # if we doesn't swap blocks, we can move the model to device
+            flux.to(device)
 
-    # 実験的機能：勾配も含めたfp16学習を行う　PyTorchにパッチを当ててfp16でのgrad scaleを有効にする
-    if args.full_fp16:
-        # During deepseed training, accelerate not handles fp16/bf16|mixed precision directly via scaler. Let deepspeed engine do.
-        # -> But we think it's ok to patch accelerator even if deepspeed is enabled.
-        # train_util.patch_accelerator_for_fp16_training(accelerator) # removed accelerate. no need to patch accelerator for fp16 training
-        pass
 
     # resumeする
     # train_util.resume_from_local_or_hf_if_specified(accelerator, args) # removed accelerate. will implement manual resume logic
