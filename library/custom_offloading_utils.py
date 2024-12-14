@@ -238,7 +238,7 @@ class ModelOffloader(Offloader):
 
         for b in blocks[self.num_blocks - self.blocks_to_swap :]:
             b.to(self.device)  # move block to device first
-            weighs_to_device(b, "cpu")  # make sure weights are on cpu
+            weighs_to_device(b, torch.device("cpu"))  # make sure weights are on cpu, using torch.device("cpu")
 
         synchronize_device(self.device)
         clean_memory_on_device(self.device)
