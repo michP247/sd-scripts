@@ -5275,38 +5275,8 @@ def prepare_accelerator(args: argparse.Namespace):
     if args.torch_compile:
         dynamo_backend = args.dynamo_backend
 
-    # kwargs_handlers = [
-    #     (
-    #         InitProcessGroupKwargs(
-    #             backend="gloo" if os.name == "nt" or not torch.cuda.is_available() else "nccl",
-    #             init_method=(
-    #                 "env://?use_libuv=False" if os.name == "nt" and Version(torch.__version__) >= Version("2.4.0") else None
-    #             ),
-    #             timeout=datetime.timedelta(minutes=args.ddp_timeout) if args.ddp_timeout else None,
-    #         )
-    #         if torch.cuda.device_count() > 1
-    #         else None
-    #     ),
-    #     (
-    #         DistributedDataParallelKwargs(
-    #             gradient_as_bucket_view=args.ddp_gradient_as_bucket_view, static_graph=args.ddp_static_graph
-    #         )
-    #         if args.ddp_gradient_as_bucket_view or args.ddp_static_graph
-    #         else None
-    #     ),
-    # ]
-    # kwargs_handlers = [i for i in kwargs_handlers if i is not None]
     deepspeed_plugin = deepspeed_utils.prepare_deepspeed_plugin(args)
 
-    # accelerator = Accelerator( # removed accelerator
-    #     gradient_accumulation_steps=args.gradient_accumulation_steps,
-    #     mixed_precision=args.mixed_precision,
-    #     log_with=log_with,
-    #     project_dir=logging_dir,
-    #     kwargs_handlers=kwargs_handlers,
-    #     dynamo_backend=dynamo_backend,
-    #     deepspeed_plugin=deepspeed_plugin,
-    # )
     device = xm.xla_device()
     print("Training on XLA device:", device)
     return device

@@ -193,9 +193,8 @@ def train(args):
 
     # acceleratorを準備する
     logger.info("prepare accelerator")
-    # accelerator = train_util.prepare_accelerator(args)  # Removed accelerate
-    device = xm.xla_device() # Use XLA device
-    logger.info(f"Training on device: {device}")
+    device = train_util.prepare_accelerator(args) # getting xla device
+    print(f"training on device: {device}")
 
     # mixed precisionに対応した型を用意しておき適宜castする
     weight_dtype, save_dtype = train_util.prepare_dtype(args)
