@@ -18,6 +18,7 @@ import torch
 from einops import rearrange
 from torch import Tensor, nn
 from torch.utils.checkpoint import checkpoint
+import torch.xla.core.xla_model as xm
 
 from library import custom_offloading_utils
 
