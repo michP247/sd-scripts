@@ -596,10 +596,10 @@ def train(args):
         )
 
     if is_swapping_blocks:
-        #print("Before prepare_block_swap_before_forward:")
-        #for name, param in flux.named_parameters():
-        #    if "img_mod.lin.weight" in name:
-        #        print(f"  Parameter '{name}' device: {param.data.device}")
+        print("Before prepare_block_swap_before_forward:")
+        for name, param in flux.named_parameters():
+            if "img_mod.lin.weight" in name:
+                print(f"  Parameter '{name}' device: {param.data.device}")
         flux.prepare_block_swap_before_forward()
 
     # For --sample_at_first

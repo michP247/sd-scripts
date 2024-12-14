@@ -81,27 +81,14 @@ def swap_weight_devices_no_cuda(device: torch.device, layer_to_cpu: nn.Module, l
 
     synchronize_device(device)
 
-def parameters_to_device(layer, device):
-    for name, param in layer.named_parameters():
-        if param.data.device != device:
-            print(f"Moving parameter '{name}' to {device}")
-            # Directly use the move function
-            param.data = torch.Tensor(param.data).to(device).bfloat16()
-
-            print(f"  New device: {param.data.device}")
-            print(f"  New dtype: {param.data.dtype}")
-
-def buffers_to_device(layer, device):
-    for name, buffer in layer.named_buffers():
-        if buffer.data.device != device:
-            print(f"Moving buffer '{name}' to {device}")
-             # Directly use the move function
-            buffer.data = torch.Tensor(buffer.data).to(device).bfloat16()
-            
-            print(f"  New device: {buffer.data.device}")
-            print(f"  New dtype: {buffer.data.dtype}")
-        else:
-             print(f"  Buffer '{name}' is already on {device}")
+def weighs_to_device(layer: nn.Module, device: torch.device):
+    for module in layer.modules():
+        if hasattr(module, "weight") and module.weight is not None:
+            print(f"  Old device: {module.data.device}")
+            print(f"Moving module '{module}' to {device}")
+            module.weight.data = module.weight.data.to(device, non_blocking=True)
+            print(f"  New device: {module.data.device}")
+            print(f"  New dtype: {module.data.dtype}")
 
 class Offloader:
     """
@@ -212,23 +199,13 @@ class ModelOffloader(Offloader):
         if self.debug:
             print("Prepare block devices before forward")
 
-        synchronize_device(self.device)
-
-        for i, b in enumerate(blocks[0 : self.num_blocks - self.blocks_to_swap]):
-            if self.debug:
-                print(f"Processing block {i}: moving to device")
+        for b in blocks[0 : self.num_blocks - self.blocks_to_swap]:
             b.to(self.device)
-            parameters_to_device(b, self.device)  # Ensure parameters are on device
-            buffers_to_device(b, self.device)  # Ensure buffers are on device
+            weighs_to_device(b, self.device)  # make sure weights are on device
 
-        for i, b in enumerate(blocks[self.num_blocks - self.blocks_to_swap :]):
-            block_index = self.num_blocks - self.blocks_to_swap + i
-            if self.debug:
-                print(f"Processing block {block_index}: moving to device, then parameters/buffers to CPU")
-            b.to(self.device)  # Move block to device first
-            if not all(param.data.device == torch.device("cpu") for param in b.parameters()): # only move to cpu if not already on cpu
-                parameters_to_device(b, "cpu")  # Move parameters to CPU
-                buffers_to_device(b, "cpu") # Move buffers to CPU
+        for b in blocks[self.num_blocks - self.blocks_to_swap :]:
+            b.to(self.device)  # move block to device first
+            weighs_to_device(b, "cpu")  # make sure weights are on cpu
 
         synchronize_device(self.device)
         clean_memory_on_device(self.device)
