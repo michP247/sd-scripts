@@ -479,7 +479,7 @@ class LatentsCachingStrategy:
         img_tensor, alpha_masks, original_sizes, crop_ltrbs = train_util.load_images_and_masks_for_caching(
             image_infos, alpha_mask, random_crop
         )
-        img_tensor = img_tensor.to(device=vae_device, dtype=vae_dtype)
+        # img_tensor = img_tensor.to(device=vae_device, dtype=vae_dtype) # removed the to call here
 
         with torch.no_grad():
             latents_tensors = encode_by_vae(img_tensor).to("cpu")
