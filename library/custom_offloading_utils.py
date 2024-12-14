@@ -3,11 +3,8 @@ import time
 from typing import Optional
 import torch
 import torch.nn as nn
-
 from library.device_utils import clean_memory_on_device
 
-import torch
-import time
 import torch_xla.core.xla_model as xm
 import torch.nn as nn
 from typing import Optional, Tuple
@@ -45,7 +42,6 @@ def synchronize_device(device: Optional[torch.device] = None):
 def clean_memory_on_device(device: Optional[torch.device] = None):
     if device is not None and device.type == 'xla':
         xm.mark_step()
-        xm.release_free_memory()
     elif device is not None and device.type == 'cuda':
         torch.cuda.empty_cache()
 
@@ -249,11 +245,9 @@ class ModelOffloader(Offloader):
                     print(f"  Parameter 'double_blocks.{i}.img_mod.lin.weight' device: {b.img_mod.lin.weight.device}")
 
         for b in blocks[0 : self.num_blocks - self.blocks_to_swap]:
-            b.to(self.device)
             weighs_to_device(b, self.device)  # make sure weights are on device
 
         for b in blocks[self.num_blocks - self.blocks_to_swap :]:
-            b.to(self.device)  # move block to device first
             weighs_to_device(b, torch.device("cpu"))  # make sure weights are on cpu, using torch.device("cpu")
 
         synchronize_device(self.device)
@@ -268,7 +262,6 @@ class ModelOffloader(Offloader):
 
         # move blocks to cpu except the first blocks_to_swap blocks
         for b in blocks[self.blocks_to_swap :]:
-            b.to(self.device)  # move block to device first
             weighs_to_device(b, torch.device("cpu"))  # make sure weights are on cpu
 
         synchronize_device(self.device)
@@ -282,7 +275,6 @@ class ModelOffloader(Offloader):
 
         if block_idx >= self.num_blocks - self.blocks_to_swap:
             # Offload the current block to CPU
-            self.blocks[block_idx].to(self.device)
             weighs_to_device(self.blocks[block_idx], torch.device("cpu"))
             synchronize_device(self.device)
 
