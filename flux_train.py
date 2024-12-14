@@ -395,9 +395,14 @@ def train(args):
         optimizer_train_fn = lambda: None  # dummy function
         optimizer_eval_fn = lambda: None  # dummy function
     else:
-        if args.optimizer_type.lower() == "Adafactor":
-            # Use xoptim.Adafactor for XLA compatibility
-            optimizer = xoptim.Adafactor(
+        if args.optimizer_type.lower() == "adafactor":
+            # Use torch.optim.Adafactor for compatibility
+            try:
+                from torch.optim import Adafactor
+            except ImportError:
+                raise ImportError("Please install torch.optim.Adafactor: pip install torch.optim.Adafactor")
+
+            optimizer = Adafactor(
                 params_to_optimize[0]['params'],
                 lr=params_to_optimize[0]['lr'],
                 scale_parameter=args.optimizer_args[0].split('=')[1].lower() == 'true',  # Extract from optimizer_args
@@ -405,11 +410,16 @@ def train(args):
                 warmup_init=args.optimizer_args[2].split('=')[1].lower() == 'true',  # Extract from optimizer_args
                 weight_decay=float(args.optimizer_args[3].split('=')[1]),  # Extract from optimizer_args
             )
-            logger.info("Using Adafactor optimizer from torch_xla.optimizers")
+            logger.info("Using Adafactor optimizer from torch.optim")
+
         else:
-            # Use torch.optim.AdamW with XLA optimizations
-            optimizer = xoptim.AdamW(params_to_optimize[0]['params'], lr=params_to_optimize[0]['lr'])
-            logger.info("Using AdamW optimizer from torch_xla.optimizers")
+            # Use torch.optim.AdamW
+            optimizer = optim.AdamW(
+                params_to_optimize[0]['params'],
+                lr=params_to_optimize[0]['lr'],
+                weight_decay=float(args.optimizer_args[3].split('=')[1]) # set weight decay
+            )
+            logger.info("Using AdamW optimizer from torch.optim")
 
         optimizer_train_fn, optimizer_eval_fn = train_util.get_optimizer_train_eval_fn(optimizer, args)
 
