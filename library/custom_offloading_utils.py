@@ -84,13 +84,16 @@ def swap_weight_devices_no_cuda(device: torch.device, layer_to_cpu: nn.Module, l
 def weighs_to_device(layer: nn.Module, device: torch.device):
     for module in layer.modules():
         if hasattr(module, "weight") and module.weight is not None:
-            if device.type == 'cpu':
+            if device.type == "cpu":
+                # For CPU, ensure direct transfer without creating an intermediate tensor
                 print(f"  Old device: {module.weight.data.device}")
                 print(f"Moving module '{module}' to {device}")
-                module.weight.data = module.weight.data.to(device)
+                temp_data = module.weight.data.to(device, non_blocking=True)
+                module.weight.data = temp_data
                 print(f"  New device: {module.weight.data.device}")
                 print(f"  New dtype: {module.weight.data.dtype}")
             else:
+                # For non-CPU devices, use the original logic with non_blocking=True
                 print(f"  Old device: {module.weight.data.device}")
                 print(f"Moving module '{module}' to {device}")
                 module.weight.data = module.weight.data.to(device, non_blocking=True)
