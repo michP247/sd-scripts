@@ -87,7 +87,7 @@ def weighs_to_device(layer: nn.Module, device: torch.device):
         if hasattr(module, "weight") and module.weight is not None:
             #print(f"  Old device: {module.weight.data.device}")
             #print(f"  Old dtype: {module.weight.data.dtype}")
-            print(f"Moving module '{module}' to {device}")
+            #print(f"Moving module '{module}' to {device}")
             module.weight = torch.nn.Parameter(module.weight.to(device, non_blocking=True)) # Move entire parameter to CPU
             #print(f"  New device: {module.weight.data.device}")
             #print(f"  New dtype: {module.weight.data.dtype}")
