@@ -109,8 +109,8 @@ class ResnetBlock(nn.Module):
         h = x
         h = self.norm1(h)
         h = swish(h)
-        #h = self.conv1(h)
-        h = self.conv1(h.to(self.conv1.bias.dtype))
+        h = self.conv1(h)
+
         h = self.norm2(h)
         h = swish(h)
         h = self.conv2(h)
