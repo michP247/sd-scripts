@@ -1230,22 +1230,19 @@ class ControlNetFlux(nn.Module):
 
     def enable_gradient_checkpointing(self, cpu_offload: bool = False):
         self.gradient_checkpointing = True
-        self.cpu_offload_checkpointing = cpu_offload
-
+        # self.cpu_offload_checkpointing = cpu_offload removed cpu offload
         self.time_in.enable_gradient_checkpointing()
         self.vector_in.enable_gradient_checkpointing()
         if self.guidance_in.__class__ != nn.Identity:
             self.guidance_in.enable_gradient_checkpointing()
 
         for block in self.double_blocks + self.single_blocks:
-            block.enable_gradient_checkpointing(cpu_offload=cpu_offload)
-
+            block.enable_gradient_checkpointing() # removed cpu_offload
         print(f"FLUX: Gradient checkpointing enabled. CPU offload: {cpu_offload}")
 
     def disable_gradient_checkpointing(self):
         self.gradient_checkpointing = False
-        self.cpu_offload_checkpointing = False
-
+        # self.cpu_offload_checkpointing = False # removed cpu offload
         self.time_in.disable_gradient_checkpointing()
         self.vector_in.disable_gradient_checkpointing()
         if self.guidance_in.__class__ != nn.Identity:
