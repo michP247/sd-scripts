@@ -930,7 +930,8 @@ class Flux(nn.Module):
         self.num_double_blocks = len(self.double_blocks)
         self.num_single_blocks = len(self.single_blocks)
 
-        # Initialize all sub-modules on the CPU to avoid immediately placing them on the device
+        self.device = device # Added initial device attribute
+         # Initialize all sub-modules on the CPU to avoid immediately placing them on the device
         self.pe_embedder.to("cpu")
         self.img_in.to("cpu")
         self.time_in.to("cpu")
@@ -982,9 +983,12 @@ class Flux(nn.Module):
 
         print("FLUX: Gradient checkpointing disabled.")
 
+    def get_device(self):
+        return next(self.parameters()).device
+
     def enable_block_swap(self, blocks_to_swap: int, device: torch.device):
         self.blocks_to_swap = blocks_to_swap
-        double_blocks_to_swap = blocks_to_swap // 2  # Corrected line
+        double_blocks_to_swap = blocks_to_swap // 2
         single_blocks_to_swap = (blocks_to_swap - double_blocks_to_swap) * 2
 
         assert double_blocks_to_swap <= self.num_double_blocks - 1 and single_blocks_to_swap <= self.num_single_blocks - 1, (
@@ -998,7 +1002,8 @@ class Flux(nn.Module):
         self.offloader_single = custom_offloading_utils.ModelOffloader(
             self.single_blocks, self.num_single_blocks, single_blocks_to_swap, device, debug=False
         )
-        self.device = device # Add this line to update the device attribute
+        # self.device = device # Removed this line
+
         print(
             f"FLUX: Block swap enabled. Swapping {blocks_to_swap} blocks, double blocks: {double_blocks_to_swap}, single blocks: {single_blocks_to_swap}."
         )
@@ -1021,7 +1026,7 @@ class Flux(nn.Module):
                 weighs_to_device(block, "cpu")
             for block in self.single_blocks:
                 weighs_to_device(block, "cpu")
-
+            
             # Move only the necessary blocks to the device
             num_blocks_to_load = self.num_double_blocks - self.blocks_to_swap // 2
             for i in range(num_blocks_to_load):
@@ -1040,8 +1045,6 @@ class Flux(nn.Module):
                 self.offloader_single = custom_offloading_utils.ModelOffloader(
                     self.single_blocks, self.num_single_blocks, (self.blocks_to_swap - self.blocks_to_swap // 2) * 2, device, debug=False
                 )
-
-            self.device = device # Add this line to update the device attribute
 
     def prepare_block_swap_before_forward(self):
         if self.blocks_to_swap is None or self.blocks_to_swap == 0:

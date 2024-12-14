@@ -120,13 +120,6 @@ def load_flow_model(
     for ckpt_path in ckpt_paths:
         sd.update(load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype))
 
-
-    # load_sft doesn't support torch.device
-    logger.info(f"Loading state dict from {ckpt_path}")
-    sd = {}
-    for ckpt_path in ckpt_paths:
-        sd.update(load_safetensors(ckpt_path, device=str(device), disable_mmap=disable_mmap, dtype=dtype))
-
     # convert Diffusers to BFL
     if is_diffusers:
         logger.info("Converting Diffusers to BFL")
