@@ -214,7 +214,7 @@ class ModelOffloader(Offloader):
         if self.debug:
             print("Prepare block devices before forward")
 
-        synchronize_device(self.device)  # Synchronize before starting
+        synchronize_device(self.device)
 
         for i, b in enumerate(blocks[0 : self.num_blocks - self.blocks_to_swap]):
             if self.debug:
@@ -228,10 +228,11 @@ class ModelOffloader(Offloader):
             if self.debug:
                 print(f"Processing block {block_index}: moving to device, then parameters/buffers to CPU")
             b.to(self.device)  # Move block to device first
-            parameters_to_device(b, "cpu")  # Move parameters to CPU
-            buffers_to_device(b, "cpu") # Move buffers to CPU
+            if not all(param.data.device == torch.device("cpu") for param in b.parameters()): # only move to cpu if not already on cpu
+                parameters_to_device(b, "cpu")  # Move parameters to CPU
+                buffers_to_device(b, "cpu") # Move buffers to CPU
 
-        synchronize_device(self.device)  # Synchronize after moving
+        synchronize_device(self.device)
         clean_memory_on_device(self.device)
 
     def wait_for_block(self, block_idx: int):
