@@ -57,27 +57,28 @@ def swap_weight_devices_cuda(device: torch.device, layer_to_cpu: nn.Module, laye
     stream.synchronize()
     torch.cuda.current_stream().synchronize()  # this prevents the illegal loss value
 
-def swap_weight_devices_no_cuda(device: torch.device, layer_to_cpu: nn.Module, layer_to_cuda: nn.Module):
+def swap_weight_devices_no_cuda(device: torch.device, layer_to_cpu: nn.Module, layer_to_device: nn.Module):
     """
-    not tested
-    """
-    assert layer_to_cpu.__class__ == layer_to_cuda.__class__
+    Swaps the weights of two layers between a non-CUDA device and CPU.
 
-    weight_swap_jobs = []
-    for module_to_cpu, module_to_cuda in zip(layer_to_cpu.modules(), layer_to_cuda.modules()):
+    This function assumes that `layer_to_device` is already on the specified device
+    and `layer_to_cpu` is on the CPU.
+    """
+    assert layer_to_cpu.__class__ == layer_to_device.__class__
+
+    # Transfer weights from device to CPU
+    for module_to_cpu, module_to_device in zip(layer_to_cpu.modules(), layer_to_device.modules()):
         if hasattr(module_to_cpu, "weight") and module_to_cpu.weight is not None:
-            weight_swap_jobs.append((module_to_cpu, module_to_cuda, module_to_cpu.weight.data, module_to_cuda.weight.data))
-
-    # device to cpu
-    for module_to_cpu, module_to_cuda, cuda_data_view, cpu_data_view in weight_swap_jobs:
-        module_to_cpu.weight.data = cuda_data_view.data.to("cpu", non_blocking=True)
+            # Ensure the module on the device has its weights transferred to CPU
+            module_to_cpu.weight = nn.Parameter(module_to_device.weight.to("cpu", non_blocking=True))
 
     synchronize_device(device)
 
-    # cpu to device
-    for module_to_cpu, module_to_cuda, cuda_data_view, cpu_data_view in weight_swap_jobs:
-        cuda_data_view.copy_(module_to_cuda.weight.data, non_blocking=True)
-        module_to_cuda.weight.data = cuda_data_view
+    # Transfer weights from CPU to device
+    for module_to_cpu, module_to_device in zip(layer_to_cpu.modules(), layer_to_device.modules()):
+        if hasattr(module_to_device, "weight") and module_to_device.weight is not None:
+            # Transfer the weights from the now CPU-resident module to the device
+            module_to_device.weight = nn.Parameter(module_to_cpu.weight.to(device, non_blocking=True))
 
     synchronize_device(device)
 
