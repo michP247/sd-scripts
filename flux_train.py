@@ -344,10 +344,9 @@ def train(args):
         ae.to(device, dtype=weight_dtype)
 
     # Initialize process group after model and components are on the device
-    if xm.xrt_world_size() > 1:
-        dist.init_process_group("xla")
 
     # Wrap the model in DDP after moving it to the device
+    dist.init_process_group("xla")
     flux = DDP(flux, gradient_as_bucket_view=True)
 
     training_models = []
