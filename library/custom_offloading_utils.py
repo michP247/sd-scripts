@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 from typing import Optional
 import torch
+import torch_xla
 import torch.nn as nn
 from library.device_utils import clean_memory_on_device
 import torch_xla.core.xla_model as xm
@@ -12,6 +13,7 @@ import subprocess
 def get_tpu_memory_info():
     """Retrieves and parses the output of the 'tpu-info' command."""
     try:
+        t = torch.randn((300, 300), device=torch_xla.device())
         result = subprocess.run(['tpu-info', '-d', 'all'], capture_output=True, text=True, check=True)
         return result.stdout
     except subprocess.CalledProcessError as e:

@@ -64,9 +64,10 @@ import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 import subprocess
 
-t = torch.randn((300, 300), device=torch_xla.device())
+
 def print_tpu_info():
     try:
+        t = torch.randn((300, 300), device=torch_xla.device())
         result = subprocess.run(['tpu-info', '-d', 'all'], capture_output=True, text=True, check=True)
         print(result.stdout)
     except subprocess.CalledProcessError as e:
