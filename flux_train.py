@@ -53,6 +53,7 @@ from library.config_util import (
 from library.custom_train_functions import apply_masked_loss, add_custom_train_arguments
 
 import torch
+import torch_xla
 import torch.nn as nn
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
@@ -63,7 +64,7 @@ import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 import subprocess
 
-
+t = torch.randn((300, 300), device=torch_xla.device())
 def print_tpu_info():
     try:
         result = subprocess.run(['tpu-info', '-d', 'all'], capture_output=True, text=True, check=True)
@@ -75,6 +76,7 @@ def train(args):
 
     print("TPU Info Before Training:")
     print_tpu_info()
+    train(args)
     
     train_util.verify_training_args(args)
     train_util.prepare_dataset_args(args, True)
