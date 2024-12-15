@@ -61,11 +61,17 @@ import torch_xla.utils.utils as xu
 import torch.optim as optim
 # import torch.distributed as dist # commented out
 from torch.nn.parallel import DistributedDataParallel as DDP
+import subprocess
 
-# import torch_xla.distributed.xla_backend # commented out
 
-# Removed the first, smaller train() function
-
+def print_tpu_info():
+    """Prints the output of the tpu-info command."""
+    try:
+        result = subprocess.run(['tpu-info', '-d', 'all'], capture_output=True, text=True, check=True)
+        print(result.stdout)
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing tpu-info: {e}")
+        
 def train(args):
 
     print("TPU Info Before Training:")
@@ -899,13 +905,7 @@ def setup_parser() -> argparse.ArgumentParser:
     )
     return parser
 
-def print_tpu_info():
-    """Prints the output of the tpu-info command."""
-    try:
-        result = subprocess.run(['tpu-info', '-d', 'all'], capture_output=True, text=True, check=True)
-        print(result.stdout)
-    except subprocess.CalledProcessError as e:
-        print(f"Error executing tpu-info: {e}")
+
 
 
 if __name__ == "__main__":
