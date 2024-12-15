@@ -74,9 +74,6 @@ def print_tpu_info():
         print(f"Error executing tpu-info: {e}")
         
 def train(args):
-
-    print("TPU Info Before Training:")
-    print_tpu_info()
     
     train_util.verify_training_args(args)
     train_util.prepare_dataset_args(args, True)
@@ -211,6 +208,10 @@ def train(args):
     logger.info("prepare accelerator")
     device = xm.xla_device()
     print(f"training on device: {device}")
+
+    # Print TPU info after initializing the device
+    print("TPU Info After Device Initialization:")
+    print_tpu_info()
 
     # mixed precisionに対応した型を用意しておき適宜castする
     weight_dtype, save_dtype = train_util.prepare_dtype(args)
