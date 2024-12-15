@@ -45,6 +45,8 @@ from library.custom_train_functions import (
 )
 from library.sdxl_original_unet import SdxlUNet2DConditionModel
 
+import ast
+
 
 UNET_NUM_BLOCKS_FOR_BLOCK_LR = 23
 
