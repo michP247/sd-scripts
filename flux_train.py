@@ -62,6 +62,8 @@ import torch.optim as optim
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+import torch_xla.distributed.xla_backend
+
 
 def train(args):
     train_util.verify_training_args(args)
@@ -625,7 +627,10 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 # ... (rest of the code in flux_train.py)
 
 def train(args):
-    # ... (your existing code before the training loop)
+
+    # dist initialization
+    dist.init_process_group("xla")
+    device = xm.xla_device()
 
     # acceleratorを準備する
     logger.info("prepare accelerator")
@@ -633,8 +638,6 @@ def train(args):
     # + device = xm.xla_device() # getting xla device
     device = xm.xla_device() # replace accelerator with getting xla device directly
     print(f"training on device: {device}")
-
-    # ... (your existing code)
 
     # load FLUX
     _, flux = flux_utils.load_flow_model(
@@ -644,8 +647,6 @@ def train(args):
     # + # `gradient_as_bucket_view=True` required for XLA
     # + ddp_model = DDP(model, gradient_as_bucket_view=True)
     flux = DDP(flux, gradient_as_bucket_view=True)
-
-    # ... (your existing code)
 
     epoch = 0  # avoid error when max_train_steps is 0
     for epoch in range(num_train_epochs):
