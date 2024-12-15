@@ -346,8 +346,8 @@ def train(args):
     # Initialize process group after model and components are on the device
 
     # Wrap the model in DDP after moving it to the device
-    dist.init_process_group("xla")
-    flux = DDP(flux, gradient_as_bucket_view=True)
+    #dist.init_process_group("xla")
+    #flux = DDP(flux, gradient_as_bucket_view=True)
 
     training_models = []
     params_to_optimize = []
