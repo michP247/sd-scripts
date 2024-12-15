@@ -942,7 +942,7 @@ def setup_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--face_crop_aug_range",
         type=ast.literal_eval,
-        default=[0.0, 0.0],
+        default="[0.0, 0.0]",  # Default as a string
         help="Range of scaling factors for face crop augmentation (example: [0.8, 1.2])",
     )
     return parser
