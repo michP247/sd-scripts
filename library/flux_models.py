@@ -691,6 +691,7 @@ class DoubleStreamBlock(nn.Module):
     def _forward(
         self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, txt_attention_mask: Optional[Tensor] = None
     ) -> tuple[Tensor, Tensor]:
+        vec = vec.to(img.device) # Ensure vec is on the same device as img and txt
         img_mod1, img_mod2 = self.img_mod(vec)
         txt_mod1, txt_mod2 = self.txt_mod(vec)
 
