@@ -693,8 +693,9 @@ class DoubleStreamBlock(nn.Module):
 
     def to(self, *args, **kwargs):
         self = super().to(*args, **kwargs)
-        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
-        self.device = device
+        # Modified to handle the case where more than 3 values are returned
+        parsed_args = torch._C._nn._parse_to(*args, **kwargs)
+        self.device = parsed_args[0] if isinstance(parsed_args[0], torch.device) else None
         return self
 
     def _forward(

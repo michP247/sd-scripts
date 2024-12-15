@@ -67,6 +67,10 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 # Removed the first, smaller train() function
 
 def train(args):
+
+    print("TPU Info Before Training:")
+    print_tpu_info()
+    
     train_util.verify_training_args(args)
     train_util.prepare_dataset_args(args, True)
     # sdxl_train_util.verify_sdxl_training_args(args)
@@ -220,7 +224,9 @@ def train(args):
         ae.to("cpu")  # if no sampling, vae can be deleted
         clean_memory_on_device(device)
         xm.rendezvous("load-vae-and-cache-latents")
-        # accelerator.wait_for_everyone() # removed accelerate
+
+        print("TPU Info After Caching Latents:")
+        print_tpu_info()
 
     # prepare tokenize strategy
     if args.t5xxl_max_token_length is None:
@@ -892,6 +898,14 @@ def setup_parser() -> argparse.ArgumentParser:
         help="[EXPERIMENTAL] enable offloading of tensors to CPU during checkpointing / チェックポイント時にテンソルをCPUにオフロードする",
     )
     return parser
+
+def print_tpu_info():
+    """Prints the output of the tpu-info command."""
+    try:
+        result = subprocess.run(['tpu-info', '-d', 'all'], capture_output=True, text=True, check=True)
+        print(result.stdout)
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing tpu-info: {e}")
 
 
 if __name__ == "__main__":
