@@ -836,6 +836,12 @@ def setup_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="[EXPERIMENTAL] enable offloading of tensors to CPU during checkpointing / チェックポイント時にテンソルをCPUにオフロードする",
     )
+    parser.add_argument(
+        "--face_crop_aug_range",
+        type=ast.literal_eval,
+        default=[0.0, 0.0],
+        help="Range of scaling factors for face crop augmentation (example: [0.8, 1.2])",
+    )
     return parser
 
 

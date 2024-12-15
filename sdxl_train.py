@@ -937,6 +937,12 @@ def setup_parser() -> argparse.ArgumentParser:
         default=None,
         help="number of optimizers for fused backward pass and optimizer step / fused backward passとoptimizer stepのためのoptimizer数",
     )
+    parser.add_argument(
+        "--face_crop_aug_range",
+        type=ast.literal_eval,
+        default=[0.0, 0.0],
+        help="Range of scaling factors for face crop augmentation (example: [0.8, 1.2])",
+    )
     return parser
 
 
