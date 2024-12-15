@@ -60,7 +60,7 @@ import torch_xla.distributed.parallel_loader as pl
 import torch_xla.utils.utils as xu
 # import torch_xla.distributed.xla_multiprocessing as xmp # commented out
 import torch.optim as optim
-# import torch.distributed as dist # commented out
+import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import subprocess
 
@@ -342,6 +342,10 @@ def train(args):
         ae.requires_grad_(False)
         ae.eval()
         ae.to(device, dtype=weight_dtype)
+
+    # Initialize process group after model and components are on the device
+    if xm.xrt_world_size() > 1:
+        dist.init_process_group("xla")
 
     # Wrap the model in DDP after moving it to the device
     flux = DDP(flux, gradient_as_bucket_view=True)
