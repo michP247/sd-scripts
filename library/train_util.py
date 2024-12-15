@@ -5278,7 +5278,7 @@ def prepare_accelerator(args: argparse.Namespace):
     deepspeed_plugin = deepspeed_utils.prepare_deepspeed_plugin(args)
 
     device = xm.xla_device()
-    print("Training on XLA device:", device)
+    #print("Training on XLA device:", device)
     return device
 
 

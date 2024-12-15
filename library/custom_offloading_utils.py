@@ -7,6 +7,21 @@ from library.device_utils import clean_memory_on_device
 import torch_xla.core.xla_model as xm
 from typing import Optional, Tuple
 
+import subprocess
+
+def get_tpu_memory_info():
+    """Retrieves and parses the output of the 'tpu-info' command."""
+    try:
+        result = subprocess.run(['tpu-info', '-d', 'all'], capture_output=True, text=True, check=True)
+        return result.stdout
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing tpu-info: {e}")
+        return "Could not retrieve TPU info."
+
+def print_tpu_memory_usage():
+    """Prints the TPU memory usage information."""
+    print(get_tpu_memory_info())
+
 def get_memory_stats(device: torch.device) -> str:
     """Gets a string summarizing memory statistics for the given device."""
     if device.type == 'xla':
@@ -127,9 +142,17 @@ class Offloader:
 
             start_time = time.perf_counter()
             print(f"Move block {bidx_to_cpu} to CPU and block {bidx_to_cuda} to {'CUDA' if self.cuda_available else 'device'}")
+
+            # Add tpu-info output before and after the swap
+            if self.device.type == 'xla':
+                print("TPU Memory Info (Before Swap):")
+                print_tpu_memory_usage()
+
             self.swap_weight_devices(block_to_cpu, block_to_cuda)
 
-            xm.mark_step()
+            if self.device.type == 'xla':
+                print("TPU Memory Info (After Swap):")
+                print_tpu_memory_usage()
 
             if self.debug:
                 print(f"Moved blocks {bidx_to_cpu} and {bidx_to_cuda} in {time.perf_counter()-start_time:.2f}s")
