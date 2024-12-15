@@ -290,10 +290,6 @@ def train(args):
         args.pretrained_model_name_or_path, weight_dtype, device, args.disable_mmap_load_safetensors
     )
 
-    flux = DDP(flux, gradient_as_bucket_view=True)
-
-    # Do not call flux.to(device) here
-
     if args.gradient_checkpointing:
         flux.enable_gradient_checkpointing(cpu_offload=args.cpu_offload_checkpointing)
 
@@ -329,6 +325,8 @@ def train(args):
         ae.requires_grad_(False)
         ae.eval()
         ae.to(device, dtype=weight_dtype)
+
+    flux = DDP(flux, gradient_as_bucket_view=True)
 
     training_models = []
     params_to_optimize = []
@@ -629,13 +627,9 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 def train(args):
 
     # dist initialization
-    dist.init_process_group("xla")
-    device = xm.xla_device()
 
     # acceleratorを準備する
     logger.info("prepare accelerator")
-    # - device = train_util.prepare_accelerator(args) # getting xla device
-    # + device = xm.xla_device() # getting xla device
     device = xm.xla_device() # replace accelerator with getting xla device directly
     print(f"training on device: {device}")
 
