@@ -77,7 +77,6 @@ def train(args):
 
     print("TPU Info Before Training:")
     print_tpu_info()
-    train(args)
     
     train_util.verify_training_args(args)
     train_util.prepare_dataset_args(args, True)
