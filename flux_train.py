@@ -57,13 +57,14 @@ import torch.nn as nn
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
 import torch_xla.utils.utils as xu
-import torch_xla.distributed.xla_multiprocessing as xmp
+# import torch_xla.distributed.xla_multiprocessing as xmp # commented out
 import torch.optim as optim
-import torch.distributed as dist
+# import torch.distributed as dist # commented out
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-import torch_xla.distributed.xla_backend
+# import torch_xla.distributed.xla_backend # commented out
 
+# Removed the first, smaller train() function
 
 def train(args):
     train_util.verify_training_args(args)
@@ -197,7 +198,7 @@ def train(args):
 
     # acceleratorを準備する
     logger.info("prepare accelerator")
-    device = train_util.prepare_accelerator(args) # getting xla device
+    device = xm.xla_device()
     print(f"training on device: {device}")
 
     # mixed precisionに対応した型を用意しておき適宜castする
@@ -287,8 +288,10 @@ def train(args):
 
     # load FLUX
     _, flux = flux_utils.load_flow_model(
-        args.pretrained_model_name_or_path, weight_dtype, device, args.disable_mmap_load_safetensors
+        args.pretrained_model_name_or_path, weight_dtype, "cpu", args.disable_mmap_load_safetensors
     )
+
+    # Do not call flux.to(device) here
 
     if args.gradient_checkpointing:
         flux.enable_gradient_checkpointing(cpu_offload=args.cpu_offload_checkpointing)
@@ -326,6 +329,7 @@ def train(args):
         ae.eval()
         ae.to(device, dtype=weight_dtype)
 
+    # Wrap the model in DDP after moving it to the device
     flux = DDP(flux, gradient_as_bucket_view=True)
 
     training_models = []
@@ -477,8 +481,6 @@ def train(args):
         #if is_swapping_blocks:
             #flux.move_to_device_except_swap_blocks(device)  # reduce peak memory usage
 
-
-
     # resumeする
     # train_util.resume_from_local_or_hf_if_specified(accelerator, args) # removed accelerate. will implement manual resume logic
 
@@ -617,30 +619,6 @@ def train(args):
         wandb.log({"empty": 0}, step=0)
 
     loss_recorder = train_util.LossRecorder()
-
-# ... (other imports in flux_train.py)
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-
-# ... (rest of the code in flux_train.py)
-
-def train(args):
-
-    # dist initialization
-
-    # acceleratorを準備する
-    logger.info("prepare accelerator")
-    device = xm.xla_device() # replace accelerator with getting xla device directly
-    print(f"training on device: {device}")
-
-    # load FLUX
-    _, flux = flux_utils.load_flow_model(
-        args.pretrained_model_name_or_path, weight_dtype, device, args.disable_mmap_load_safetensors
-    )
-
-    # + # `gradient_as_bucket_view=True` required for XLA
-    # + ddp_model = DDP(model, gradient_as_bucket_view=True)
-    flux = DDP(flux, gradient_as_bucket_view=True)
 
     epoch = 0  # avoid error when max_train_steps is 0
     for epoch in range(num_train_epochs):
