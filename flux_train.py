@@ -65,7 +65,6 @@ import subprocess
 
 
 def print_tpu_info():
-    """Prints the output of the tpu-info command."""
     try:
         result = subprocess.run(['tpu-info', '-d', 'all'], capture_output=True, text=True, check=True)
         print(result.stdout)
