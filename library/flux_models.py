@@ -681,6 +681,7 @@ class DoubleStreamBlock(nn.Module):
 
         self.gradient_checkpointing = False
         self.cpu_offload_checkpointing = False
+        self.device = "cpu"
 
     def enable_gradient_checkpointing(self, cpu_offload: bool = False):
         self.gradient_checkpointing = True
@@ -690,55 +691,41 @@ class DoubleStreamBlock(nn.Module):
         self.gradient_checkpointing = False
         self.cpu_offload_checkpointing = False
 
+    def to(self, *args, **kwargs):
+        self = super().to(*args, **kwargs)
+        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
+        self.device = device
+        return self
+
     def _forward(
         self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, txt_attention_mask: Optional[Tensor] = None
     ) -> tuple[Tensor, Tensor]:
-        vec = vec.to(self.device)  # Ensure vec is on the correct device
+        vec = vec.to(self.device) # use self.device here
         img_mod1, img_mod2 = self.img_mod(vec)
         txt_mod1, txt_mod2 = self.txt_mod(vec)
 
         # prepare image for attention
-        img_modulated = self.img_norm1(img)
-        img_modulated = (1 + img_mod1.scale) * img_modulated + img_mod1.shift
-        img_qkv = self.img_attn.qkv(img_modulated)
-        img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
-        img_q, img_k = self.img_attn.norm(img_q, img_k, img_v)
+        h_img = img
+        h_img = h_img + img_mod1.scale * self.pe_embedder(pe, ids=self.img_ids)
+        img_attn_in = self.img_attn_in(h_img, img_mod1.shift, img_mod2)
 
-        # prepare txt for attention
-        txt_modulated = self.txt_norm1(txt)
-        txt_modulated = (1 + txt_mod1.scale) * txt_modulated + txt_mod1.shift
-        txt_qkv = self.txt_attn.qkv(txt_modulated)
-        txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
-        txt_q, txt_k = self.txt_attn.norm(txt_q, txt_k, txt_v)
+        # prepare text for attention
+        h_txt = txt
+        h_txt = h_txt + txt_mod1.scale * self.pe_embedder(pe, ids=self.txt_ids)
+        txt_attn_in = self.txt_attn_in(h_txt, txt_mod1.shift, txt_mod2)
 
-        # run actual attention
-        q = torch.cat((txt_q, img_q), dim=2)
-        k = torch.cat((txt_k, img_k), dim=2)
-        v = torch.cat((txt_v, img_v), dim=2)
+        # attention
+        img_attn_out, txt_attn_out = self.attn(
+            img_attn_in, txt_attn_in, img_mod2.scale, txt_mod2.scale, txt_attention_mask
+        )
 
-        # make attention mask if not None
-        attn_mask = None
-        if txt_attention_mask is not None:
-            # F.scaled_dot_product_attention expects attn_mask to be bool for binary mask
-            attn_mask = txt_attention_mask.to(torch.bool)  # b, seq_len
-            attn_mask = torch.cat(
-                (attn_mask, torch.ones(attn_mask.shape[0], img.shape[1], device=attn_mask.device, dtype=torch.bool)), dim=1
-            )  # b, seq_len + img_len
+        # mlp
+        img_mlp_in = self.img_mlp_in(h_img, img_mod1.shift, img_mod2)
+        txt_mlp_in = self.txt_mlp_in(h_txt, txt_mod1.shift, txt_mod2)
+        img_mlp_out = self.img_mlp(img_mlp_in)
+        txt_mlp_out = self.txt_mlp(txt_mlp_in)
 
-            # broadcast attn_mask to all heads
-            attn_mask = attn_mask[:, None, None, :].expand(-1, q.shape[1], q.shape[2], -1)
-
-        attn = attention(q, k, v, pe=pe, attn_mask=attn_mask)
-        txt_attn, img_attn = attn[:, : txt.shape[1]], attn[:, txt.shape[1] :]
-
-        # calculate the img blocks
-        img = img + img_mod1.gate * self.img_attn.proj(img_attn)
-        img = img + img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift)
-
-        # calculate the txt blocks
-        txt = txt + txt_mod1.gate * self.txt_attn.proj(txt_attn)
-        txt = txt + txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
-        return img, txt
+        return img + img_attn_out + img_mlp_out, txt + txt_attn_out + txt_mlp_out
 
     def forward(
         self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, txt_attention_mask: Optional[Tensor] = None
