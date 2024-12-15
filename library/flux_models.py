@@ -640,6 +640,8 @@ class Modulation(nn.Module):
         self.lin = nn.Linear(dim, self.multiplier * dim, bias=True)
 
     def forward(self, vec: Tensor) -> tuple[ModulationOut, ModulationOut | None]:
+        if vec.device != self.lin.weight.device or vec.dtype != self.lin.weight.dtype:
+            vec = vec.to(device=self.lin.weight.device, dtype=self.lin.weight.dtype)
         out = self.lin(nn.functional.silu(vec))[:, None, :].chunk(self.multiplier, dim=-1)
 
         return (
@@ -691,7 +693,7 @@ class DoubleStreamBlock(nn.Module):
     def _forward(
         self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, txt_attention_mask: Optional[Tensor] = None
     ) -> tuple[Tensor, Tensor]:
-        vec = vec.to(img.device) # Ensure vec is on the same device as img and txt
+        vec = vec.to(self.device)  # Ensure vec is on the correct device
         img_mod1, img_mod2 = self.img_mod(vec)
         txt_mod1, txt_mod2 = self.txt_mod(vec)
 
