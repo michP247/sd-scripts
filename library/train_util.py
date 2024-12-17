@@ -26,7 +26,7 @@ from typing import (
 from accelerate import Accelerator, InitProcessGroupKwargs, DistributedDataParallelKwargs, PartialState
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
-from torch_xla.distributed.distributed_optimizer import DistributedOptimizer
+from torch.distributed.optim import DistributedOptimizer
 import glob
 import math
 import os
