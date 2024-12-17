@@ -19,51 +19,37 @@ import time
 from typing import List, Optional, Tuple, Union
 import toml
 import wandb
-import bitsandbytes as bnb
-
 from tqdm import tqdm
 
 import torch
-import torch.nn as nn
+import torch_xla as xla
+import torch_xla.core.xla_model as xm
+import torch_xla.distributed.parallel_loader as pl
+from torch_xla import runtime
+import subprocess
+
 from library import utils
 from library.device_utils import init_ipex, clean_memory_on_device
+
 
 init_ipex()
 
 # from accelerate.utils import set_seed  # Remove accelerate dependency
 from library import deepspeed_utils, flux_train_utils, flux_utils, strategy_base, strategy_flux
 from library.sd3_train_utils import FlowMatchEulerDiscreteScheduler
-
 import library.train_util as train_util
-
 from library.utils import setup_logging, add_logging_arguments
 
 setup_logging()
 import logging
-
 logger = logging.getLogger(__name__)
 
 import library.config_util as config_util
-
-# import library.sdxl_train_util as sdxl_train_util
 from library.config_util import (
     ConfigSanitizer,
     BlueprintGenerator,
 )
 from library.custom_train_functions import apply_masked_loss, add_custom_train_arguments
-
-import torch
-import torch_xla
-import torch.nn as nn
-import torch_xla.core.xla_model as xm
-import torch_xla.distributed.parallel_loader as pl
-import torch_xla.utils.utils as xu
-# import torch_xla.distributed.xla_multiprocessing as xmp # commented out
-import torch.optim as optim
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-import subprocess
-
 
 def print_tpu_info():
     try:
@@ -74,7 +60,7 @@ def print_tpu_info():
         print(f"Error executing tpu-info: {e}")
         
 def train(args):
-    
+
     train_util.verify_training_args(args)
     train_util.prepare_dataset_args(args, True)
     # sdxl_train_util.verify_sdxl_training_args(args)
@@ -204,25 +190,24 @@ def train(args):
             train_dataset_group.is_text_encoder_output_cacheable()
         ), "when caching text encoder output, either caption_dropout_rate, shuffle_caption, token_warmup_step or caption_tag_dropout_rate cannot be used / text encoderの出力をキャッシュするときはcaption_dropout_rate, shuffle_caption, token_warmup_step, caption_tag_dropout_rateは使えません"
 
-    # acceleratorを準備する
+    # Prepare Accelerator
     logger.info("prepare accelerator")
-    device = xm.xla_device()
+    device = xla.device()
     print(f"training on device: {device}")
 
     # Print TPU info after initializing the device
     print("TPU Info After Device Initialization:")
     print_tpu_info()
 
-    # mixed precisionに対応した型を用意しておき適宜castする
+    # Prepare a type corresponding to mixed precision and cast it accordingly.
     weight_dtype, save_dtype = train_util.prepare_dtype(args)
 
-    # モデルを読み込む
+    # Load model
 
     # load VAE for caching latents
     ae = None
     if cache_latents:
-        #ae = flux_utils.load_ae(args.ae, weight_dtype, "cpu", args.disable_mmap_load_safetensors)
-        ae = flux_utils.load_ae(args.ae, weight_dtype, device)
+        ae = flux_utils.load_ae(args.ae, weight_dtype, "cpu", args.disable_mmap_load_safetensors)
         ae.to(device, dtype=weight_dtype)
         ae.requires_grad_(False)
         ae.eval()
@@ -305,8 +290,6 @@ def train(args):
         args.pretrained_model_name_or_path, weight_dtype, "cpu", args.disable_mmap_load_safetensors
     )
 
-    # Do not call flux.to(device) here
-
     if args.gradient_checkpointing:
         flux.enable_gradient_checkpointing(cpu_offload=args.cpu_offload_checkpointing)
 
@@ -321,12 +304,9 @@ def train(args):
             blocks_to_swap += args.single_blocks_to_swap // 2
         if blocks_to_swap > 0:
             logger.warning(
-                "double_blocks_to_swap and single_blocks_to_swap are deprecated. Use blocks_to_swap instead."
-                " / double_blocks_to_swapとsingle_blocks_to_swapは非推奨です。blocks_to_swapを使ってください。"
-            )
+                "double_blocks_to_swap and single_blocks_to_swap are deprecated. Use blocks_to_swap instead.")
             logger.info(
-                f"double_blocks_to_swap={args.double_blocks_to_swap} and single_blocks_to_swap={args.single_blocks_to_swap} are converted to blocks_to_swap={blocks_to_swap}."
-            )
+                f"double_blocks_to_swap={args.double_blocks_to_swap} and single_blocks_to_swap={args.single_blocks_to_swap} are converted to blocks_to_swap={blocks_to_swap}.")
             args.blocks_to_swap = blocks_to_swap
         del blocks_to_swap
 
@@ -334,7 +314,7 @@ def train(args):
     if is_swapping_blocks:
         logger.info(f"enable block swap: blocks_to_swap={args.blocks_to_swap}")
         flux.enable_block_swap(args.blocks_to_swap, device)
-        flux.move_to_device_except_swap_blocks(device) # added this line after enabling block swapping
+        #flux.move_to_device_except_swap_blocks(device) # added this line after enabling block swapping
 
     if not cache_latents:
         # load VAE here if not cached
@@ -342,12 +322,6 @@ def train(args):
         ae.requires_grad_(False)
         ae.eval()
         ae.to(device, dtype=weight_dtype)
-
-    # Initialize process group after model and components are on the device
-
-    # Wrap the model in DDP after moving it to the device
-    #dist.init_process_group("xla")
-    #flux = DDP(flux, gradient_as_bucket_view=True)
 
     training_models = []
     params_to_optimize = []
@@ -411,7 +385,7 @@ def train(args):
         optimizers = []
         for group in grouped_params:
             # Use torch.optim.AdamW 
-            optimizer = optim.AdamW(group['params'], lr=group['lr'])
+            _, _, optimizer = train_util.get_optimizer(args, trainable_params=[group])
             optimizers.append(optimizer)
         optimizer = optimizers[0]  # avoid error in the following code
 
@@ -430,7 +404,7 @@ def train(args):
     # some strategies can be None
     train_dataset_group.set_current_strategies()
 
-    # DataLoaderのプロセス数：0 は persistent_workers が使えないので注意
+    # Number of DataLoader processes: Note that 0 means persistent_workers cannot be used.
     n_workers = min(args.max_data_loader_n_workers, os.cpu_count())  # cpu_count or max_data_loader_n_workers
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset_group,
@@ -442,27 +416,27 @@ def train(args):
     )
     train_dataloader = pl.MpDeviceLoader(train_dataloader, device)
 
-    # 学習ステップ数を計算する
+    # Calculate the number of learning steps
     if args.max_train_epochs is not None:
         args.max_train_steps = args.max_train_epochs * math.ceil(
-            len(train_dataloader) / xm.xrt_world_size() / args.gradient_accumulation_steps
+            len(train_dataloader) / runtime.world_size() / args.gradient_accumulation_steps
         )
         logger.info(
-            f"override steps. steps for {args.max_train_epochs} epochs is / 指定エポックまでのステップ数: {args.max_train_steps}"
+            f"override steps. steps for {args.max_train_epochs} epochs is: {args.max_train_steps}"
         )
 
-    # データセット側にも学習ステップを送信
+    # Send training steps to the dataset side as well
     train_dataset_group.set_max_train_steps(args.max_train_steps)
 
-    # lr schedulerを用意する
+    # Prepare lr scheduler
     if args.blockwise_fused_optimizers:
         # prepare lr schedulers for each optimizer
-        lr_schedulers = [train_util.get_scheduler_fix(args, optimizer, xm.xrt_world_size()) for optimizer in optimizers]
+        lr_schedulers = [train_util.get_scheduler_fix(args, optimizer, runtime.world_size()) for optimizer in optimizers]
         lr_scheduler = lr_schedulers[0]  # avoid error in the following code
     else:
-        lr_scheduler = train_util.get_scheduler_fix(args, optimizer, xm.xrt_world_size())
+        lr_scheduler = train_util.get_scheduler_fix(args, optimizer, runtime.world_size())
 
-    # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
+    # Experimental function: fp16/bf16 learning including gradients Make the entire model fp16/bf16
     if args.full_fp16:
         assert (
             args.mixed_precision == "fp16"
@@ -491,68 +465,46 @@ def train(args):
 
     if args.deepspeed:
         raise ValueError("Deepspeed is not supported for XLA, use native XLA implementation instead.")
-    #else:
-        # accelerator does some magic
-        # if we doesn't swap blocks, we can move the model to device
-        # flux = accelerator.prepare(flux, device_placement=[not is_swapping_blocks]) # removed accelerate
-        #if is_swapping_blocks:
-            #flux.move_to_device_except_swap_blocks(device)  # reduce peak memory usage
-
-    # resumeする
-    # train_util.resume_from_local_or_hf_if_specified(accelerator, args) # removed accelerate. will implement manual resume logic
-
-    # Resume Checkpoint logic here
-    if args.resume is not None:
-        if os.path.isfile(args.resume):
-            logger.info(f"Resuming from checkpoint: {args.resume}")
-            checkpoint = torch.load(args.resume, map_location='cpu')
-            flux.load_state_dict(checkpoint['model'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-        if 'lr_scheduler' in checkpoint:
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-        global_step = checkpoint.get('global_step', 0)
-        epoch = checkpoint.get('epoch', 0)
-        current_step.value = global_step
-        current_epoch.value = epoch
     else:
-        logger.warning(f"Checkpoint {args.resume} not found, skipping resume")
+        flux = xm.MpModelWrapper(flux)
+        if is_swapping_blocks:
+            flux.move_to_device_except_swap_blocks(device)  # reduce peak memory usage
 
     if args.fused_backward_pass:
-        # use fused optimizer for backward pass: other optimizers will be supported in the future
         import library.adafactor_fused
 
         library.adafactor_fused.patch_adafactor_fused(optimizer)
 
+        # Track whether we need to step the optimizer (only on the last accumulation step)
+        step_optimizer = False
+
         for param_group, param_name_group in zip(optimizer.param_groups, param_names):
             for parameter, param_name in zip(param_group["params"], param_name_group):
                 if parameter.requires_grad:
-
                     def create_grad_hook(p_name, p_group):
                         def grad_hook(tensor: torch.Tensor):
-                            if args.max_grad_norm != 0.0: # remove the sync_gradient conditional
-                                xm.clip_grad_norm_(tensor, args.max_grad_norm)
-                            optimizer.step_param(tensor, p_group)
-                            tensor.grad = None
+                            global step_optimizer
+                            if args.max_grad_norm != 0.0:
+                                xm.reduce_gradients(optimizer)  # All-reduce grads across cores
+                                # Clip norm is the same across all gradients, so we can do it here
+                                torch.nn.utils.clip_grad_norm_(p_group["params"], args.max_grad_norm)
+                            if step_optimizer:
+                                optimizer.step_param(tensor, p_group)  # Custom step in fused Adafactor
+
+                            # Set grads to None manually only after optimizer step
+                            if step_optimizer:
+                                tensor.grad = None
 
                         return grad_hook
 
                     parameter.register_post_accumulate_grad_hook(create_grad_hook(param_name, param_group))
 
     elif args.blockwise_fused_optimizers:
-        # prepare for additional optimizers and lr schedulers
-        for i in range(1, len(optimizers)):
-            # optimizers[i] = accelerator.prepare(optimizers[i])  # removed accelerator. no need to prepare the optimizer
-            # lr_schedulers[i] = accelerator.prepare(lr_schedulers[i]) # removed accelerator. no need to prepare the lr scheduler
-            pass
-
-        # counters are used to determine when to step the optimizer
-        global optimizer_hooked_count
-        global num_parameters_per_group
-        global parameter_optimizer_map
 
         optimizer_hooked_count = {}
         num_parameters_per_group = [0] * len(optimizers)
         parameter_optimizer_map = {}
+        step_optimizers = [False] * len(optimizers)
 
         for opt_idx, optimizer in enumerate(optimizers):
             for param_group in optimizer.param_groups:
@@ -560,39 +512,40 @@ def train(args):
                     if parameter.requires_grad:
 
                         def grad_hook(parameter: torch.Tensor):
-                            if args.max_grad_norm != 0.0: # remove sync_gradient condition
-                                xm.clip_grad_norm_(parameter, args.max_grad_norm)
+                            global step_optimizers
+                            if args.max_grad_norm != 0.0:
+                                xm.reduce_gradients(optimizer)  # All-reduce gradients
+                                torch.nn.utils.clip_grad_norm_(param_group["params"], args.max_grad_norm)
 
                             i = parameter_optimizer_map[parameter]
                             optimizer_hooked_count[i] += 1
-                            if optimizer_hooked_count[i] == num_parameters_per_group[i]:
-                                optimizers[i].step()
-                                optimizers[i].zero_grad(set_to_none=True)
+                            if optimizer_hooked_count[i] == num_parameters_per_group[i] and step_optimizers[i]:
+                                optimizers[i].zero_grad(set_to_none=True) # Only set grads to None after optimizer step
 
                         parameter.register_post_accumulate_grad_hook(grad_hook)
                         parameter_optimizer_map[parameter] = opt_idx
                         num_parameters_per_group[opt_idx] += 1
 
-    # epoch数を計算する
+    # Calculate the number of epochs
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
     num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
     if (args.save_n_epoch_ratio is not None) and (args.save_n_epoch_ratio > 0):
         args.save_every_n_epochs = math.floor(num_train_epochs / args.save_n_epoch_ratio) or 1
 
-    # 学習する
+    # Learning
     # total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps # removed accelerator
-    logger.info("running training / 学習開始")
-    logger.info(f"  num examples / サンプル数: {train_dataset_group.num_train_images}")
-    logger.info(f"  num batches per epoch / 1epochのバッチ数: {len(train_dataloader)}")
-    logger.info(f"  num epochs / epoch数: {num_train_epochs}")
+    logger.info("running training")
+    logger.info(f"  num images: {train_dataset_group.num_train_images}")
+    logger.info(f"  num batches per epoch: {len(train_dataloader)}")
+    logger.info(f"  num epochs: {num_train_epochs}")
     logger.info(
-        f"  batch size per device / バッチサイズ: {', '.join([str(d.batch_size) for d in train_dataset_group.datasets])}"
+        f"  batch size per device: {', '.join([str(d.batch_size) for d in train_dataset_group.datasets])}"
     )
     # accelerator.print(
     #     f"  total train batch size (with parallel & distributed & accumulation) / 総バッチサイズ（並列学習、勾配合計含む）: {total_batch_size}"
     # )
-    logger.info(f"  gradient accumulation steps / 勾配を合計するステップ数 = {args.gradient_accumulation_steps}")
-    logger.info(f"  total optimization steps / 学習ステップ数: {args.max_train_steps}")
+    logger.info(f"  gradient accumulation steps = {args.gradient_accumulation_steps}")
+    logger.info(f"  total optimization steps: {args.max_train_steps}")
 
     progress_bar = tqdm(range(args.max_train_steps), smoothing=0, disable=xm.get_ordinal() != 0, desc="steps")
     global_step = 0
@@ -600,7 +553,7 @@ def train(args):
     noise_scheduler = FlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=args.discrete_flow_shift)
     noise_scheduler_copy = copy.deepcopy(noise_scheduler)
 
-    # if accelerator.is_main_process: # removed accelerator, use xm.get_ordinal() == 0 instead
+    # Log tracking
     if xm.get_ordinal() == 0:
         init_kwargs = {}
         if args.wandb_run_name:
@@ -613,7 +566,7 @@ def train(args):
         #     init_kwargs=init_kwargs,
         # ) # removed accelerator, will implement wandb logging manually.
         wandb.init(
-            project="flux-training", #  Replace with your desired project name
+            project="finetuning"if args.log_tracker_name is None else args.log_tracker_name,
             name=args.wandb_run_name if args.wandb_run_name else "flux-training",
             config=args,
         )
@@ -625,18 +578,7 @@ def train(args):
                 print(f"  Parameter '{name}' device: {param.data.device}")
         flux.prepare_block_swap_before_forward()
 
-    # For --sample_at_first
-    optimizer_eval_fn()
-    flux_train_utils.sample_images(device, args, 0, global_step, flux, ae, [clip_l, t5xxl], sample_prompts_te_outputs) # modified to use xla device instead of accelerator
-    optimizer_train_fn()
-    # if len(accelerator.trackers) > 0: # removed accelerator
-        # log empty object to commit the sample images to wandb
-        # accelerator.log({}, step=0) # removed accelerator
-    if xm.get_ordinal() == 0:
-        wandb.log({"empty": 0}, step=0)
-
     loss_recorder = train_util.LossRecorder()
-
     epoch = 0  # avoid error when max_train_steps is 0
     for epoch in range(num_train_epochs):
         logger.info(f"\nepoch {epoch+1}/{num_train_epochs}")
@@ -647,147 +589,122 @@ def train(args):
 
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
-            # + with xla.step():
-            with xm.step():
+            
+            if args.blockwise_fused_optimizers:
+                optimizer_hooked_count = {i: 0 for i in range(len(optimizers))}  # reset counter for each step
 
-                if args.blockwise_fused_optimizers:
-                    optimizer_hooked_count = {i: 0 for i in range(len(optimizers))}  # reset counter for each step
-
-                # - # with accelerator.accumulate(*training_models): # removed accelerator, manually accumulate gradients.
-                # Manually accumulate gradients:
-                for model in training_models:
-                    model.zero_grad(set_to_none=True)
-                with torch.autocast(device.type):  # add autocast for XLA
-
-                    if "latents" in batch and batch["latents"] is not None:
-                        # + latents = batch["latents"].to(device, dtype=weight_dtype)
-                        latents = batch["latents"].to(xm.xla_device(), dtype=weight_dtype, non_blocking=True)
-                    else:
-                        with torch.no_grad():
-                            # + # Transfer data to the XLA device. This happens asynchronously.
-                            # + inputs, labels = inputs.to(xla.device()), labels.to(xla.device())
-                            images = batch["images"].to(xm.xla_device(), dtype=ae.dtype, non_blocking=True)
-                            latents = ae.encode(images).to(xm.xla_device(), dtype=weight_dtype, non_blocking=True)
-
-                        # NaNが含まれていれば警告を表示し0に置き換える
-                        if torch.any(torch.isnan(latents)):
-                            logger.info("NaN found in latents, replacing with zeros")
-                            latents = torch.nan_to_num(latents, 0, out=latents)
-
-                    text_encoder_outputs_list = batch.get("text_encoder_outputs_list", None)
-                    if text_encoder_outputs_list is not None:
-                        text_encoder_conds = text_encoder_outputs_list
-                    else:
-                        # not cached or training, so get from text encoders
-                        # + input_ids = [ids.to(device) for ids in batch["input_ids_list"]]
-                        input_ids = [ids.to(xm.xla_device(), non_blocking=True) for ids in batch["input_ids_list"]]
-                        tokens_and_masks = batch["input_ids_list"]
-                        with torch.no_grad():
-                            # - input_ids = [ids.to(device) for ids in batch["input_ids_list"]]
-                            text_encoder_conds = text_encoding_strategy.encode_tokens(
-                                flux_tokenize_strategy, [clip_l, t5xxl], input_ids, args.apply_t5_attn_mask
-                            )
-                            if args.full_fp16:
-                                text_encoder_conds = [c.to(weight_dtype) for c in text_encoder_conds]
-    
-                    # TODO support some features for noise implemented in get_noise_noisy_latents_and_timesteps
-    
-                    # Sample noise that we'll add to the latents
-                    noise = torch.randn_like(latents)
-                    bsz = latents.shape[0]
-    
-                    # get noisy model input and timesteps
-                    noisy_model_input, timesteps, sigmas = flux_train_utils.get_noisy_model_input_and_timesteps(
-                        args, noise_scheduler_copy, latents, noise, device, weight_dtype
+            # Manually accumulate gradients:
+            if "latents" in batch and batch["latents"] is not None:
+                latents = batch["latents"].to(device, dtype=weight_dtype)
+            else:
+                with torch.no_grad():
+                    # encode images to latents. images are [-1, 1]
+                    latents = ae.encode(batch["images"].to(device, dtype=ae.dtype)).to(
+                        device, dtype=weight_dtype
                     )
-    
-                    # pack latents and get img_ids
-                    # + packed_noisy_model_input = flux_utils.pack_latents(noisy_model_input)  # b, c, h*2, w*2 -> b, h*w, c*4
-                    packed_noisy_model_input = flux_utils.pack_latents(noisy_model_input).to(xm.xla_device())
-                    packed_latent_height, packed_latent_width = noisy_model_input.shape[2] // 2, noisy_model_input.shape[3] // 2
-                    # - img_ids = flux_utils.prepare_img_ids(bsz, packed_latent_height, packed_latent_width).to(device=device)
-                    # + img_ids = flux_utils.prepare_img_ids(bsz, packed_latent_height, packed_latent_width).to(xm.xla_device())
-                    img_ids = flux_utils.prepare_img_ids(bsz, packed_latent_height, packed_latent_width).to(xm.xla_device())
-    
-                    # get guidance: ensure args.guidance_scale is float
-                    # - guidance_vec = torch.full((bsz,), float(args.guidance_scale), device=device)
-                    # + guidance_vec = torch.full((bsz,), float(args.guidance_scale), device=xm.xla_device())
-                    guidance_vec = torch.full((bsz,), float(args.guidance_scale), device=xm.xla_device())
-    
-                    # call model
-                    l_pooled, t5_out, txt_ids, t5_attn_mask = text_encoder_conds
-                    if not args.apply_t5_attn_mask:
-                        t5_attn_mask = None
 
-                    model_pred = flux(
-                        img=packed_noisy_model_input,
-                        img_ids=img_ids,
-                        txt=t5_out,
-                        txt_ids=txt_ids,
-                        y=l_pooled,
-                        timesteps=timesteps / 1000,
-                        guidance=guidance_vec,
-                        txt_attention_mask=t5_attn_mask,
+                    # If NaN is included, a warning is displayed and replaced with 0
+                    if torch.any(torch.isnan(latents)):
+                        logger.info("NaN found in latents, replacing with zeros")
+                        latents = torch.nan_to_num(latents, 0, out=latents)
+
+            text_encoder_outputs_list = batch.get("text_encoder_outputs_list", None)
+            if text_encoder_outputs_list is not None:
+                text_encoder_conds = text_encoder_outputs_list
+            else:
+                # not cached or training, so get from text encoders
+                tokens_and_masks = batch["input_ids_list"]
+                with torch.no_grad():
+                    input_ids = [ids.to(device) for ids in batch["input_ids_list"]]
+                    text_encoder_conds = text_encoding_strategy.encode_tokens(
+                        flux_tokenize_strategy, [clip_l, t5xxl], input_ids, args.apply_t5_attn_mask
                     )
-    
-                    # unpack latents
-                    model_pred = flux_utils.unpack_latents(model_pred, packed_latent_height, packed_latent_width)
-    
-                    # apply model prediction type
-                    model_pred, weighting = flux_train_utils.apply_model_prediction_type(args, model_pred, noisy_model_input, sigmas)
-    
-                    # flow matching loss: this is different from SD3
-                    target = noise - latents
-    
-                    # calculate loss
-                    huber_c = train_util.get_huber_threshold_if_needed(args, timesteps, noise_scheduler)
-                    loss = train_util.conditional_loss(model_pred.float(), target.float(), args.loss_type, "none", huber_c)
-                    if weighting is not None:
-                        loss = loss * weighting
-                    if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
-                        loss = apply_masked_loss(loss, batch)
-                    loss = loss.mean([1, 2, 3])
-    
-                    loss_weights = batch["loss_weights"]  # 各sampleごとのweight
-                    loss = loss * loss_weights
-                    loss = loss.mean()
-    
-                    # backward
-                    loss = loss / args.gradient_accumulation_steps
-                    loss.backward()
+                    if args.full_fp16:
+                        text_encoder_conds = [c.to(weight_dtype) for c in text_encoder_conds]
 
-                # Gradient accumulation and optimizer step
-                if (step + 1) % args.gradient_accumulation_steps == 0:
-                    if not (args.fused_backward_pass or args.blockwise_fused_optimizers):
-                        if args.max_grad_norm != 0.0:  # remove sync_gradients from original impl.
-                            params_to_clip = []
-                            for m in training_models:
-                                params_to_clip.extend(m.parameters())
-                            # - xm.clip_grad_norm_(params_to_clip, args.max_grad_norm)
-                            torch.nn.utils.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+            # TODO support some features for noise implemented in get_noise_noisy_latents_and_timesteps
 
-                        # - optimizer.step()
-                        # + xm.optimizer_step(optimizer)
-                        xm.optimizer_step(optimizer)
-                        lr_scheduler.step()
-                        optimizer.zero_grad(set_to_none=True)
-                    else:
-                        # optimizer.step() and optimizer.zero_grad() are called in the optimizer hook
-                        lr_scheduler.step()
-                        if args.blockwise_fused_optimizers:
-                            for i in range(1, len(optimizers)):
-                                lr_schedulers[i].step()
+            # Sample noise that we'll add to the latents
+            noise = torch.randn_like(latents)
+            bsz = latents.shape[0]
+
+            # get noisy model input and timesteps
+            noisy_model_input, timesteps, sigmas = flux_train_utils.get_noisy_model_input_and_timesteps(
+                args, noise_scheduler_copy, latents, noise, device, weight_dtype
+            )
+
+            # pack latents and get img_ids
+            packed_noisy_model_input = flux_utils.pack_latents(noisy_model_input)  # b, c, h*2, w*2 -> b, h*w, c*4
+            packed_latent_height, packed_latent_width = noisy_model_input.shape[2] // 2, noisy_model_input.shape[3] // 2
+            img_ids = flux_utils.prepare_img_ids(bsz, packed_latent_height, packed_latent_width).to(device)
+
+            # get guidance: ensure args.guidance_scale is float
+            guidance_vec = torch.full((bsz,), float(args.guidance_scale), device)
+
+            # call model
+            l_pooled, t5_out, txt_ids, t5_attn_mask = text_encoder_conds
+            if not args.apply_t5_attn_mask:
+                t5_attn_mask = None
+
+            model_pred = flux(
+                img=packed_noisy_model_input,
+                img_ids=img_ids,
+                txt=t5_out,
+                txt_ids=txt_ids,
+                y=l_pooled,
+                timesteps=timesteps / 1000,
+                guidance=guidance_vec,
+                txt_attention_mask=t5_attn_mask,
+            )
+
+            # unpack latents
+            model_pred = flux_utils.unpack_latents(model_pred, packed_latent_height, packed_latent_width)
+
+            # apply model prediction type
+            model_pred, weighting = flux_train_utils.apply_model_prediction_type(args, model_pred, noisy_model_input, sigmas)
+
+            # flow matching loss: this is different from SD3
+            target = noise - latents
+
+            # calculate loss
+            huber_c = train_util.get_huber_threshold_if_needed(args, timesteps, noise_scheduler)
+            loss = train_util.conditional_loss(model_pred.float(), target.float(), args.loss_type, "none", huber_c)
+            if weighting is not None:
+                loss = loss * weighting
+            if args.masked_loss or ("alpha_masks" in batch and batch["alpha_masks"] is not None):
+                loss = apply_masked_loss(loss, batch)
+            loss = loss.mean([1, 2, 3])
+
+            loss_weights = batch["loss_weights"]  # Weight for each sample
+            loss = loss * loss_weights
+            loss = loss.mean()
+
+            # backward
+            loss = loss / args.gradient_accumulation_steps
+            loss.backward()
+
+            # Gradient accumulation and optimizer step
+            if (step + 1) % args.gradient_accumulation_steps == 0:
+                if not (args.fused_backward_pass or args.blockwise_fused_optimizers):
+                    if args.max_grad_norm != 0.0:
+                        params_to_clip = []
+                        for m in training_models:
+                            params_to_clip.extend(m.parameters())
+                        xm.reduce_gradients(optimizer)
+                        torch.nn.utils.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+
+                    xm.optimizer_step(optimizer)
+                    lr_scheduler.step()
+                    optimizer.zero_grad(set_to_none=True)
+                    xm.mark_step()
 
                     progress_bar.update(1)
                     global_step += 1
 
                     if xm.get_ordinal() == 0:
                         optimizer_eval_fn()
-                        flux_train_utils.sample_images(
-                            device, args, None, global_step, flux, ae, [clip_l, t5xxl], sample_prompts_te_outputs
-                        )
 
-                        # 指定ステップごとにモデルを保存
+                        # Save model at each specified step
                         if args.save_every_n_steps is not None and global_step % args.save_every_n_steps == 0:
                             xm.rendezvous("save-every-n-steps")
                             flux_train_utils.save_flux_model_on_epoch_end_or_stepwise(
@@ -802,26 +719,32 @@ def train(args):
                             )
                         optimizer_train_fn()
 
-                current_loss = loss.detach().item() * args.gradient_accumulation_steps
-                if xm.get_ordinal() == 0:
-                    logs = {"loss": current_loss}
-                    train_util.append_lr_to_logs(logs, lr_scheduler, args.optimizer_type, including_unet=True)
-                    wandb.log(logs, step=global_step)
+                    current_loss = loss.detach().item() * args.gradient_accumulation_steps
+                    if xm.get_ordinal() == 0:
+                        logs = {"loss": current_loss}
+                        train_util.append_lr_to_logs(logs, lr_scheduler, args.optimizer_type, including_unet=True)
+                        wandb.log(logs, step=global_step)
 
-                loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
-                avr_loss: float = loss_recorder.moving_average
-                logs = {"avr_loss": avr_loss}
-                progress_bar.set_postfix(**logs)
+                    loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
+                    avr_loss: float = loss_recorder.moving_average
+                    logs = {"avr_loss": avr_loss}
+                    progress_bar.set_postfix(**logs)
 
-                if global_step >= args.max_train_steps:
-                    break
+                    if global_step >= args.max_train_steps:
+                        break
+            else:
+                lr_scheduler.step()
+                if args.blockwise_fused_optimizers:
+                    for i in range(1, len(optimizers)):
+                        lr_schedulers[i].step()
 
         if xm.get_ordinal() == 0:
             logs = {"loss/epoch": loss_recorder.moving_average}
             wandb.log(logs, step=epoch + 1)
 
         xm.rendezvous("end-of-epoch")
-
+        
+        # Save model at each specified step
         optimizer_eval_fn()
         if args.save_every_n_epochs is not None:
             if xm.get_ordinal() == 0:
@@ -842,15 +765,13 @@ def train(args):
         optimizer_train_fn()
 
     if xm.get_ordinal() == 0:
-        wandb.finish()
-    optimizer_eval_fn()
+        optimizer_eval_fn()  # Evaluate the optimizer state if needed
 
-    if args.save_state or args.save_state_on_train_end:
-        train_util.save_state_on_train_end(args, device)
-
-    if xm.get_ordinal() == 0:
         flux_train_utils.save_flux_model_on_train_end(args, save_dtype, epoch, global_step, flux)
         logger.info("model saved.")
+
+    # Ensure all processes wait for the model saving to finish
+    xm.rendezvous("save_model_end")
 
 
 def setup_parser() -> argparse.ArgumentParser:
@@ -909,8 +830,6 @@ def setup_parser() -> argparse.ArgumentParser:
         help="[EXPERIMENTAL] enable offloading of tensors to CPU during checkpointing / チェックポイント時にテンソルをCPUにオフロードする",
     )
     return parser
-
-
 
 
 if __name__ == "__main__":
