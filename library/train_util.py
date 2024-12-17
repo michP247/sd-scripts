@@ -5455,7 +5455,7 @@ def get_hidden_states_sdxl(
     text_encoder1: CLIPTextModel,
     text_encoder2: CLIPTextModelWithProjection,
     weight_dtype: Optional[str] = None,
-    accelerator: Optional[Accelerator] = None,
+    device: Optional[torch.device] = None,
 ):
     # input_ids: b,n,77 -> b*n, 77
     b_size = input_ids1.size()[0]

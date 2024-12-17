@@ -94,39 +94,8 @@ def setup_logging(args=None, log_level=None, reset=False):
 
 # region PyTorch utils
 
-
-def swap_weight_devices(layer_to_cpu: nn.Module, layer_to_cuda: nn.Module):
-    assert layer_to_cpu.__class__ == layer_to_cuda.__class__
-
-    weight_swap_jobs = []
-    for module_to_cpu, module_to_cuda in zip(layer_to_cpu.modules(), layer_to_cuda.modules()):
-        if hasattr(module_to_cpu, "weight") and module_to_cpu.weight is not None:
-            weight_swap_jobs.append((module_to_cpu, module_to_cuda, module_to_cpu.weight.data, module_to_cuda.weight.data))
-
-    torch.cuda.current_stream().synchronize()  # this prevents the illegal loss value
-
-    stream = torch.cuda.Stream()
-    with torch.cuda.stream(stream):
-        # cuda to cpu
-        for module_to_cpu, module_to_cuda, cuda_data_view, cpu_data_view in weight_swap_jobs:
-            cuda_data_view.record_stream(stream)
-            module_to_cpu.weight.data = cuda_data_view.data.to("cpu", non_blocking=True)
-
-        stream.synchronize()
-
-        # cpu to cuda
-        for module_to_cpu, module_to_cuda, cuda_data_view, cpu_data_view in weight_swap_jobs:
-            cuda_data_view.copy_(module_to_cuda.weight.data, non_blocking=True)
-            module_to_cuda.weight.data = cuda_data_view
-
-    stream.synchronize()
-    torch.cuda.current_stream().synchronize()  # this prevents the illegal loss value
-
-
 def weighs_to_device(layer: nn.Module, device: torch.device):
-    for module in layer.modules():
-        if hasattr(module, "weight") and module.weight is not None:
-            module.weight.data = module.weight.data.to(device, non_blocking=True)
+    layer.to(device, non_blocking=True)
 
 
 def str_to_dtype(s: Optional[str], default_dtype: Optional[torch.dtype] = None) -> torch.dtype:
@@ -352,6 +321,15 @@ class MemoryEfficientSafeOpen:
 def load_safetensors(
     path: str, device: Union[str, torch.device], disable_mmap: bool = False, dtype: Optional[torch.dtype] = torch.float32
 ) -> dict[str, torch.Tensor]:
+    # If device is None and torch_xla is available, default to XLA device
+    if device is None and "torch_xla" in sys.modules:
+        import torch_xla.core.xla_model as xm
+        device = xm.xla_device()
+    # Otherwise, if device is None, default to CPU
+    elif device is None:
+        device = "cpu"
+
+    # ... rest of the function ...
     if disable_mmap:
         # return safetensors.torch.load(open(path, "rb").read())
         # use experimental loader
@@ -545,9 +523,17 @@ class EulerAncestralDiscreteSchedulerGL(EulerAncestralDiscreteScheduler):
         if self.resized_size is None:
             prev_sample = sample + derivative * dt
 
-            noise = diffusers.schedulers.scheduling_euler_ancestral_discrete.randn_tensor(
-                model_output.shape, dtype=model_output.dtype, device=device, generator=generator
-            )
+            if self.resized_size is None:
+                prev_sample = sample + derivative * dt
+                if device.type == 'xla':
+                    import torch_xla.core.xla_model as xm
+                    noise = xm.randn(
+                        model_output.shape, dtype=model_output.dtype, device=device, generator=generator
+                )
+            else:
+                noise = diffusers.schedulers.scheduling_euler_ancestral_discrete.randn_tensor(
+                    model_output.shape, dtype=model_output.dtype, device=device, generator=generator
+                )
             s_noise = 1.0
         else:
             print("resized_size", self.resized_size, "model_output.shape", model_output.shape, "sample.shape", sample.shape)
@@ -555,18 +541,27 @@ class EulerAncestralDiscreteSchedulerGL(EulerAncestralDiscreteScheduler):
 
             if self.gradual_latent.unsharp_target_x:
                 prev_sample = sample + derivative * dt
-                prev_sample = self.gradual_latent.interpolate(prev_sample, self.resized_size)
+                prev_sample = self.gradual_latent.interpolate(prev_sample, self.resized_size)        
             else:
                 sample = self.gradual_latent.interpolate(sample, self.resized_size)
                 derivative = self.gradual_latent.interpolate(derivative, self.resized_size, unsharp=False)
                 prev_sample = sample + derivative * dt
 
-            noise = diffusers.schedulers.scheduling_euler_ancestral_discrete.randn_tensor(
-                (model_output.shape[0], model_output.shape[1], self.resized_size[0], self.resized_size[1]),
-                dtype=model_output.dtype,
-                device=device,
-                generator=generator,
-            )
+            if device.type == 'xla':
+                import torch_xla.core.xla_model as xm
+                noise = xm.randn(
+                    (model_output.shape[0], model_output.shape[1], self.resized_size[0], self.resized_size[1]),
+                    dtype=model_output.dtype,
+                    device=device,
+                    generator=generator,
+                )  
+            else: 
+                noise = diffusers.schedulers.scheduling_euler_ancestral_discrete.randn_tensor(
+                    (model_output.shape[0], model_output.shape[1], self.resized_size[0], self.resized_size[1]),
+                    dtype=model_output.dtype,
+                    device=device,
+                    generator=generator,
+                )
 
         prev_sample = prev_sample + noise * sigma_up * s_noise
 

@@ -499,22 +499,11 @@ def save_models(
     num_devices = xm.xrt_world_size() if is_wrapped else 1
 
     if is_wrapped:
-        # Gather state_dicts from each shard
-        state_dicts = [None] * num_devices
+        # Gather state_dicts from each shard on the master ordinal
         if xm.get_ordinal() == 0:
-            # Main process receives the state_dicts from other processes
-            for i in range(num_devices):
-                if i == 0:
-                    state_dicts[i] = flux.state_dict()
-                else:
-                    state_dicts[i] = xm.rendezvous(f"get_state_dict_{i}")
-            # Merge state_dicts
-            merged_state_dict = {}
-            for d in state_dicts:
-                merged_state_dict.update(d)
+            merged_state_dict = xm.save(flux.state_dict(), None)
         else:
-            # Other processes send their state_dict to the main process
-            xm.send(flux.state_dict(), xm.get_ordinal(), dst=0)
+            xm.mark_step()
 
         # Only save on the master ordinal
         if xm.get_ordinal() == 0:
@@ -522,13 +511,13 @@ def save_models(
             if save_dtype is not None:
                 for k, v in merged_state_dict.items():
                     if v.dtype != save_dtype:
-                        merged_state_dict[k] = v.detach().clone().to("cpu").to(save_dtype)
+                        merged_state_dict[k] = v.to(save_dtype)
 
             # Save the merged state_dict using mem_eff_save_file() if requested
             if use_mem_eff_save:
                 mem_eff_save_file(merged_state_dict, ckpt_path, metadata=sai_metadata)
             else:
-                xm.save(merged_state_dict, ckpt_path, master_only=True, global_master=True)
+                torch.save(merged_state_dict, ckpt_path)
 
     else:
         # Original saving logic (no model parallelism)
@@ -538,7 +527,7 @@ def save_models(
             for k, v in sd.items():
                 key = prefix + k
                 if save_dtype is not None and v.dtype != save_dtype:
-                    v = v.detach().clone().to("cpu").to(save_dtype)
+                    v = v.to(save_dtype)
                 state_dict[key] = v
 
         update_sd("", flux.state_dict())
@@ -546,7 +535,7 @@ def save_models(
         if use_mem_eff_save:
             mem_eff_save_file(state_dict, ckpt_path, metadata=sai_metadata)
         else:
-            xm.save(state_dict, ckpt_path, master_only=True)
+            xm.save(state_dict, ckpt_path)
 
     # Synchronize all processes after saving
     xm.rendezvous("save_model_end")
