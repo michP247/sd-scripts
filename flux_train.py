@@ -17,12 +17,9 @@ import os
 from multiprocessing import Value
 import time
 from typing import List, Optional, Tuple, Union
-import toml
-import wandb
 from tqdm import tqdm
 
 import torch
-import torch_xla as xla
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
 from torch_xla import runtime
@@ -30,7 +27,8 @@ import subprocess
 
 from library import utils
 from library.device_utils import init_ipex, clean_memory_on_device
-
+import logging
+logger = logging.getLogger(__name__)
 
 init_ipex()
 
@@ -38,11 +36,6 @@ init_ipex()
 from library import deepspeed_utils, flux_train_utils, flux_utils, strategy_base, strategy_flux
 from library.sd3_train_utils import FlowMatchEulerDiscreteScheduler
 import library.train_util as train_util
-from library.utils import setup_logging, add_logging_arguments
-
-setup_logging()
-import logging
-logger = logging.getLogger(__name__)
 
 import library.config_util as config_util
 from library.config_util import (
@@ -50,14 +43,6 @@ from library.config_util import (
     BlueprintGenerator,
 )
 from library.custom_train_functions import apply_masked_loss, add_custom_train_arguments
-
-def print_tpu_info():
-    try:
-        t = torch.randn((300, 300), device=torch_xla.device())
-        result = subprocess.run(['tpu-info', '-d', 'all'], capture_output=True, text=True, check=True)
-        print(result.stdout)
-    except subprocess.CalledProcessError as e:
-        print(f"Error executing tpu-info: {e}")
         
 def train(args):
 
@@ -65,7 +50,6 @@ def train(args):
     train_util.prepare_dataset_args(args, True)
     # sdxl_train_util.verify_sdxl_training_args(args)
     deepspeed_utils.prepare_deepspeed_args(args)
-    setup_logging(args, reset=True)
 
     # temporary: backward compatibility for deprecated options. remove in the future
     if not args.skip_cache_check:
@@ -106,7 +90,7 @@ def train(args):
         )
         strategy_base.LatentsCachingStrategy.set_strategy(latents_caching_strategy)
 
-    # データセットを準備する
+    # Preparing the data set
     if args.dataset_class is None:
         blueprint_generator = BlueprintGenerator(ConfigSanitizer(True, True, args.masked_loss, True))
         if args.dataset_config is not None:
@@ -192,7 +176,7 @@ def train(args):
 
     # Prepare Accelerator
     logger.info("prepare accelerator")
-    device = xla.device()
+    device = xm.xla_device()
     print(f"training on device: {device}")
 
     # Print TPU info after initializing the device
@@ -217,9 +201,6 @@ def train(args):
         ae.to("cpu")  # if no sampling, vae can be deleted
         clean_memory_on_device(device)
         xm.rendezvous("load-vae-and-cache-latents")
-
-        print("TPU Info After Caching Latents:")
-        print_tpu_info()
 
     # prepare tokenize strategy
     if args.t5xxl_max_token_length is None:
@@ -258,6 +239,8 @@ def train(args):
 
         with torch.no_grad(), torch.autocast(device.type):  # Add autocast for XLA
             train_dataset_group.new_cache_text_encoder_outputs([clip_l, t5xxl], device)
+
+        xm.rendezvous("cache_text_encoder_outputs_end")
 
         # cache sample prompt's embeddings to free text encoder's memory
         if args.sample_prompts is not None:
@@ -553,24 +536,6 @@ def train(args):
     noise_scheduler = FlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=args.discrete_flow_shift)
     noise_scheduler_copy = copy.deepcopy(noise_scheduler)
 
-    # Log tracking
-    if xm.get_ordinal() == 0:
-        init_kwargs = {}
-        if args.wandb_run_name:
-            init_kwargs["wandb"] = {"name": args.wandb_run_name}
-        if args.log_tracker_config is not None:
-            init_kwargs = toml.load(args.log_tracker_config)
-        # accelerator.init_trackers(
-        #     "finetuning" if args.log_tracker_name is None else args.log_tracker_name,
-        #     config=train_util.get_sanitized_config_or_none(args),
-        #     init_kwargs=init_kwargs,
-        # ) # removed accelerator, will implement wandb logging manually.
-        wandb.init(
-            project="finetuning"if args.log_tracker_name is None else args.log_tracker_name,
-            name=args.wandb_run_name if args.wandb_run_name else "flux-training",
-            config=args,
-        )
-
     if is_swapping_blocks:
         print("Before prepare_block_swap_before_forward:")
         for name, param in flux.named_parameters():
@@ -646,16 +611,17 @@ def train(args):
             if not args.apply_t5_attn_mask:
                 t5_attn_mask = None
 
-            model_pred = flux(
-                img=packed_noisy_model_input,
-                img_ids=img_ids,
-                txt=t5_out,
-                txt_ids=txt_ids,
-                y=l_pooled,
-                timesteps=timesteps / 1000,
-                guidance=guidance_vec,
-                txt_attention_mask=t5_attn_mask,
-            )
+            with torch.autocast(device_type="xla", dtype=weight_dtype):
+                model_pred = flux(
+                    img=packed_noisy_model_input,
+                    img_ids=img_ids,
+                    txt=t5_out,
+                    txt_ids=txt_ids,
+                    y=l_pooled,
+                    timesteps=timesteps / 1000,
+                    guidance=guidance_vec,
+                    txt_attention_mask=t5_attn_mask,
+                )
 
             # unpack latents
             model_pred = flux_utils.unpack_latents(model_pred, packed_latent_height, packed_latent_width)
@@ -693,7 +659,7 @@ def train(args):
                         xm.reduce_gradients(optimizer)
                         torch.nn.utils.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
-                    xm.optimizer_step(optimizer)
+                    xm.optimizer_step(optimizer, barrier=True)
                     lr_scheduler.step()
                     optimizer.zero_grad(set_to_none=True)
                     xm.mark_step()
@@ -722,8 +688,7 @@ def train(args):
                     current_loss = loss.detach().item() * args.gradient_accumulation_steps
                     if xm.get_ordinal() == 0:
                         logs = {"loss": current_loss}
-                        train_util.append_lr_to_logs(logs, lr_scheduler, args.optimizer_type, including_unet=True)
-                        wandb.log(logs, step=global_step)
+                        train_util.append_lr_to_logs(logs, lr_scheduler, args.optimizer_type, including_unet=True)                       
 
                     loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
                     avr_loss: float = loss_recorder.moving_average
@@ -740,7 +705,6 @@ def train(args):
 
         if xm.get_ordinal() == 0:
             logs = {"loss/epoch": loss_recorder.moving_average}
-            wandb.log(logs, step=epoch + 1)
 
         xm.rendezvous("end-of-epoch")
         

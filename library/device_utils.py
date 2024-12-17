@@ -40,9 +40,12 @@ def clean_memory_on_device(device: torch.device):
     # device may "cuda" or "cuda:0", so we need to check the type of device
     if device.type == "cuda":
         torch.cuda.empty_cache()
-    if device.type == "xpu":
+    elif device.type == "xla":
+        # For XLA devices, use garbage collection
+        gc.collect()
+    elif device.type == "xpu":
         torch.xpu.empty_cache()
-    if device.type == "mps":
+    elif device.type == "mps":
         torch.mps.empty_cache()
 
 

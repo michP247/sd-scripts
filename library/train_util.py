@@ -77,6 +77,7 @@ from PIL import Image
 import imagesize
 import cv2
 import safetensors.torch
+import torch_xla.core.xla_model as xm
 from library.lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipeline
 from library.sdxl_lpw_stable_diffusion import SdxlStableDiffusionLongPromptWeightingPipeline
 import library.model_util as model_util
@@ -84,8 +85,6 @@ import library.huggingface_util as huggingface_util
 import library.sai_model_spec as sai_model_spec
 import library.deepspeed_utils as deepspeed_utils
 from library.utils import setup_logging, pil_resize
-
-import torch_xla.core.xla_model as xm
 
 setup_logging()
 import logging
@@ -1044,8 +1043,8 @@ class BaseDataset(torch.utils.data.Dataset):
 
     def new_cache_latents(self, model: Any, device: torch.device):
         r"""
-        a brand new method to cache latents. This method caches latents with caching strategy.
-        normal cache_latents method is used by default, but this method is used when caching strategy is specified.
+        A method to cache latents optimized for use with PyTorch XLA.
+        Caches latents using a specified caching strategy, with handling for distributed environments.
         """
         logger.info("caching latents with caching strategy.")
         caching_strategy = LatentsCachingStrategy.get_strategy()
@@ -1073,46 +1072,50 @@ class BaseDataset(torch.utils.data.Dataset):
         batch: List[ImageInfo] = []
         current_condition = None
 
-        # support multiple-gpus
-        num_processes = xm.xrt_world_size()
-        process_index = xm.get_ordinal()
-
-        # define a function to submit a batch to cache
-        def submit_batch(batch, cond, device): # add device argument
+        # Define a function to submit a batch to cache
+        def submit_batch(batch, cond):
             for info in batch:
                 if info.image is not None and isinstance(info.image, Future):
                     info.image = info.image.result()  # future to image
-            caching_strategy.cache_batch_latents(model, batch, cond.flip_aug, cond.alpha_mask, cond.random_crop, device) # pass device here
+            caching_strategy.cache_batch_latents(
+                model, batch, cond.flip_aug, cond.alpha_mask, cond.random_crop, device
+            )
 
             # remove image from memory
             for info in batch:
                 info.image = None
 
-        # define ThreadPoolExecutor to load images in parallel
-        max_workers = min(os.cpu_count(), len(image_infos), caching_strategy.batch_size) # use min
-        max_workers = max(1, max_workers)  # consider multi-gpu # remove integer division
+        # Define ThreadPoolExecutor to load images in parallel
+        max_workers = min(os.cpu_count(), len(image_infos))
+        max_workers = max(1, max_workers)  # consider multi-gpu
+        max_workers = min(max_workers, caching_strategy.batch_size)  # max_workers should be less than batch_size
         executor = ThreadPoolExecutor(max_workers)
 
+        # Use xm.xrt_world_size() and xm.get_ordinal() for distributed settings
+        num_processes = xm.xrt_world_size()
+        process_index = xm.get_ordinal()
+
+        # Create a tqdm instance for each process, but only enable it on the master ordinal
+        master_progress_bar = tqdm(total=len(image_infos), desc="Caching latents", disable=process_index != 0)
+
         try:
-            # iterate images
+            # Iterate images
             logger.info("caching latents...")
-            for i, info in enumerate(tqdm(image_infos)):
+            for i, info in enumerate(image_infos):
                 subset = self.image_to_subset[info.image_key]
 
                 if info.latents_npz is not None:  # fine tuning dataset
                     continue
 
-                # check disk cache exists and size of latents
+                # Check disk cache exists and size of latents
                 if caching_strategy.cache_to_disk:
-                    # info.latents_npz = os.path.splitext(info.absolute_path)[0] + file_suffix
-                    info.latents_npz = caching_strategy.get_latents_npz_path(info.absolute_path, info.image_size)
+                    info.latents_npz = caching_strategy.get_latents_npz_path(
+                        info.absolute_path, info.image_size
+                    )
 
-                    # if the modulo of num_processes is not equal to process_index, skip caching
-                    # this makes each process cache different latents
+                    # Shard data loading across processes
                     if i % num_processes != process_index:
                         continue
-
-                    # print(f"{process_index}/{num_processes} {i}/{len(image_infos)} {info.latents_npz}")
 
                     cache_available = caching_strategy.is_disk_cached_latents_expected(
                         info.bucket_reso, info.latents_npz, subset.flip_aug, subset.alpha_mask
@@ -1120,30 +1123,36 @@ class BaseDataset(torch.utils.data.Dataset):
                     if cache_available:  # do not add to batch
                         continue
 
-                # if batch is not empty and condition is changed, flush the batch. Note that current_condition is not None if batch is not empty
-                condition = Condition(info.bucket_reso, subset.flip_aug, subset.alpha_mask, subset.random_crop)
+                # If batch is not empty and condition is changed, flush the batch.
+                condition = Condition(
+                    info.bucket_reso, subset.flip_aug, subset.alpha_mask, subset.random_crop
+                )
                 if len(batch) > 0 and current_condition != condition:
-                    submit_batch(batch, current_condition, device) # add device argument
+                    submit_batch(batch, current_condition)
                     batch = []
 
                 if info.image is None:
-                    # load image in parallel
+                    # Load image in parallel
                     info.image = executor.submit(load_image, info.absolute_path, condition.alpha_mask)
 
                 batch.append(info)
                 current_condition = condition
 
-                # if number of data in batch is enough, flush the batch
+                # If number of data in batch is enough, flush the batch
                 if len(batch) >= caching_strategy.batch_size:
-                    submit_batch(batch, current_condition, device) # add device argument
+                    submit_batch(batch, current_condition)
                     batch = []
                     current_condition = None
 
+                # Update progress bar for the current process
+                master_progress_bar.update(1)
+
             if len(batch) > 0:
-                submit_batch(batch, current_condition, device) # add device argument
+                submit_batch(batch, current_condition)
 
         finally:
             executor.shutdown()
+            master_progress_bar.close()
 
     def cache_latents(self, vae, vae_batch_size=1, cache_to_disk=False, is_main_process=True, file_suffix=".npz"):
         # マルチGPUには対応していないので、そちらはtools/cache_latents.pyを使うこと
@@ -1220,9 +1229,10 @@ class BaseDataset(torch.utils.data.Dataset):
         for condition, batch in tqdm(batches, smoothing=1, total=len(batches)):
             cache_batch_latents(vae, cache_to_disk, batch, condition.flip_aug, condition.alpha_mask, condition.random_crop)
 
-    def new_cache_text_encoder_outputs(self, models: List[Any], device: torch.device):
+    def new_cache_text_encoder_outputs(self, models: List[Any], device):
         r"""
-        a brand new method to cache text encoder outputs. This method caches text encoder outputs with caching strategy.
+        A method to cache text encoder outputs optimized for use with PyTorch XLA.
+        Caches text encoder outputs using a specified caching strategy, with handling for distributed environments.
         """
         tokenize_strategy = TokenizeStrategy.get_strategy()
         text_encoding_strategy = TextEncodingStrategy.get_strategy()
@@ -1236,19 +1246,18 @@ class BaseDataset(torch.utils.data.Dataset):
         batches = []
         batch = []
 
-        # support multiple-gpus
+        # Use xm.xrt_world_size() and xm.get_ordinal() for distributed settings
         num_processes = xm.xrt_world_size()
         process_index = xm.get_ordinal()
 
         logger.info("checking cache validity...")
-        for i, info in enumerate(tqdm(image_infos)):
+        for i, info in enumerate(tqdm(image_infos, disable=process_index != 0)):
             # check disk cache exists and size of text encoder outputs
             if caching_strategy.cache_to_disk:
                 te_out_npz = caching_strategy.get_outputs_npz_path(info.absolute_path)
                 info.text_encoder_outputs_npz = te_out_npz  # set npz filename regardless of cache availability
 
-                # if the modulo of num_processes is not equal to process_index, skip caching
-                # this makes each process cache different text encoder outputs
+                # Shard data loading across processes
                 if i % num_processes != process_index:
                     continue
 
@@ -1270,22 +1279,28 @@ class BaseDataset(torch.utils.data.Dataset):
             logger.info("no Text Encoder outputs to cache")
             return
 
+        # Create a tqdm instance for each process, but only enable it on the master ordinal
+        master_progress_bar = tqdm(total=len(batches), desc="Caching text encoder outputs", disable=process_index != 0)
+
         # iterate batches
         logger.info("caching Text Encoder outputs...")
-        for batch in tqdm(batches, smoothing=1, total=len(batches)):
-            # cache_batch_latents(vae, cache_to_disk, batch, subset.flip_aug, subset.alpha_mask, subset.random_crop)
-            caching_strategy.cache_batch_outputs(tokenize_strategy, models, text_encoding_strategy, batch, device=device)
+        for batch in batches:
+            caching_strategy.cache_batch_outputs(tokenize_strategy, models, text_encoding_strategy, batch, device)
 
+            # Update progress bar for the current process
+            master_progress_bar.update(1)
+
+        master_progress_bar.close()
 
     # if weight_dtype is specified, Text Encoder itself and output will be converted to the dtype
     # this method is only for SDXL, but it should be implemented here because it needs to be a method of dataset
     # to support SD1/2, it needs a flag for v2, but it is postponed
     def cache_text_encoder_outputs(
-        self, tokenizers, text_encoders, devices, output_dtype, cache_to_disk=False, is_main_process=True
+        self, tokenizers, text_encoders, device, output_dtype, cache_to_disk=False, is_main_process=True
     ):
         assert len(tokenizers) == 2, "only support SDXL"
         return self.cache_text_encoder_outputs_common(
-            tokenizers, text_encoders, devices, output_dtype, [output_dtype, output_dtype], cache_to_disk, is_main_process
+            tokenizers, text_encoders, [device, device], output_dtype, [output_dtype], cache_to_disk, is_main_process
         )
 
     # same as above, but for SD3
@@ -2387,11 +2402,11 @@ class ControlNetDataset(BaseDataset):
     def cache_latents(self, vae, vae_batch_size=1, cache_to_disk=False, is_main_process=True):
         return self.dreambooth_dataset_delegate.cache_latents(vae, vae_batch_size, cache_to_disk, is_main_process)
 
-    def new_cache_latents(self, model: Any, device: torch.device):
-        return self.dreambooth_dataset_delegate.new_cache_latents(model, device)
+    def new_cache_latents(self, model: Any, accelerator: Accelerator):
+        return self.dreambooth_dataset_delegate.new_cache_latents(model, accelerator)
 
-    def new_cache_text_encoder_outputs(self, models: List[Any], device: torch.device):
-        return self.dreambooth_dataset_delegate.new_cache_text_encoder_outputs(models, device)
+    def new_cache_text_encoder_outputs(self, models: List[Any], is_main_process: bool):
+        return self.dreambooth_dataset_delegate.new_cache_text_encoder_outputs(models, is_main_process)
 
     def __len__(self):
         return self.dreambooth_dataset_delegate.__len__()
@@ -2492,10 +2507,11 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
             logger.info(f"[Dataset {i}]")
             dataset.cache_latents(vae, vae_batch_size, cache_to_disk, is_main_process, file_suffix)
 
-    def new_cache_latents(self, model: Any, device: torch.device):
+    def new_cache_latents(self, model: Any, accelerator: Accelerator):
         for i, dataset in enumerate(self.datasets):
             logger.info(f"[Dataset {i}]")
-            dataset.new_cache_latents(model, device)
+            dataset.new_cache_latents(model, accelerator)
+        accelerator.wait_for_everyone()
 
     def cache_text_encoder_outputs(
         self, tokenizers, text_encoders, device, weight_dtype, cache_to_disk=False, is_main_process=True
@@ -2513,10 +2529,11 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
                 tokenizer, text_encoders, device, output_dtype, te_dtypes, cache_to_disk, is_main_process, batch_size
             )
 
-    def new_cache_text_encoder_outputs(self, models: List[Any], device: torch.device):
+    def new_cache_text_encoder_outputs(self, models: List[Any], accelerator: Accelerator):
         for i, dataset in enumerate(self.datasets):
             logger.info(f"[Dataset {i}]")
-            dataset.new_cache_text_encoder_outputs(models, device)
+            dataset.new_cache_text_encoder_outputs(models, accelerator)
+        accelerator.wait_for_everyone()
 
     def set_caching_mode(self, caching_mode):
         for dataset in self.datasets:
@@ -2908,7 +2925,13 @@ def load_images_and_masks_for_caching(
 
 
 def cache_batch_latents(
-    vae: AutoencoderKL, cache_to_disk: bool, image_infos: List[ImageInfo], flip_aug: bool, use_alpha_mask: bool, random_crop: bool
+    vae: "AutoencoderKL",
+    cache_to_disk: bool,
+    image_infos: List["ImageInfo"],
+    flip_aug: bool,
+    use_alpha_mask: bool,
+    random_crop: bool,
+    device: torch.device,  # Add device parameter
 ) -> None:
     r"""
     requires image_infos to have: absolute_path, bucket_reso, resized_size, latents_npz
@@ -2922,9 +2945,13 @@ def cache_batch_latents(
     images = []
     alpha_masks: List[np.ndarray] = []
     for info in image_infos:
-        image = load_image(info.absolute_path, use_alpha_mask) if info.image is None else np.array(info.image, np.uint8)
-        # TODO 画像のメタデータが壊れていて、メタデータから割り当てたbucketと実際の画像サイズが一致しない場合があるのでチェック追加要
-        image, original_size, crop_ltrb = trim_and_resize_if_required(random_crop, image, info.bucket_reso, info.resized_size)
+        image = (
+            load_image(info.absolute_path, use_alpha_mask) if info.image is None else np.array(info.image, np.uint8)
+        )
+        # TODO Check for corruption of image metadata, which may cause the bucket assigned from the metadata to not match the actual image size.
+        image, original_size, crop_ltrb = trim_and_resize_if_required(
+            random_crop, image, info.bucket_reso, info.resized_size
+        )
 
         info.latents_original_size = original_size
         info.latents_crop_ltrb = crop_ltrb
@@ -2945,48 +2972,65 @@ def cache_batch_latents(
         images.append(image)
 
     img_tensors = torch.stack(images, dim=0)
-    img_tensors = img_tensors.to(device=vae.device, dtype=vae.dtype)
+    img_tensors = img_tensors.to(device=device, dtype=vae.dtype)  # Move to device
 
     with torch.no_grad():
-        latents = vae.encode(img_tensors).latent_dist.sample().to("cpu")
+        latents = vae.encode(img_tensors).latent_dist.sample()
 
     if flip_aug:
         img_tensors = torch.flip(img_tensors, dims=[3])
         with torch.no_grad():
-            flipped_latents = vae.encode(img_tensors).latent_dist.sample().to("cpu")
+            flipped_latents = vae.encode(img_tensors).latent_dist.sample()
     else:
         flipped_latents = [None] * len(latents)
 
-    for info, latent, flipped_latent, alpha_mask in zip(image_infos, latents, flipped_latents, alpha_masks):
+    latents_to_cpu = latents.to(device="cpu")
+    flipped_latents_to_cpu = [
+        f_latent.to(device="cpu") if f_latent is not None else None for f_latent in flipped_latents
+    ]
+
+    for info, latent, flipped_latent, alpha_mask in zip(
+        image_infos, latents_to_cpu, flipped_latents_to_cpu, alpha_masks
+    ):
         # check NaN
-        if torch.isnan(latents).any() or (flipped_latent is not None and torch.isnan(flipped_latent).any()):
-            raise RuntimeError(f"NaN detected in latents: {info.absolute_path}")
+        if torch.isnan(latent).any() or (flipped_latent is not None and torch.isnan(flipped_latent).any()):
+            print(f"NaN detected in latents: {info.absolute_path}")
+            continue  # Skip this sample if NaN is detected
 
         if cache_to_disk:
-            # save_latents_to_disk(
-            #     info.latents_npz,
-            #     latent,
-            #     info.latents_original_size,
-            #     info.latents_crop_ltrb,
-            #     flipped_latent,
-            #     alpha_mask,
-            # )
+            #save_latents_to_disk(
+            #    info.latents_npz,
+            #    latent,
+            #    info.latents_original_size,
+            #    info.latents_crop_ltrb,
+            #    flipped_latent,
+            #    alpha_mask,
+            #)
             pass
         else:
             info.latents = latent
             if flip_aug:
                 info.latents_flipped = flipped_latent
             info.alpha_mask = alpha_mask
-
+    
     if not HIGH_VRAM:
         clean_memory_on_device(vae.device)
 
 
 def cache_batch_text_encoder_outputs(
-    image_infos, tokenizers, text_encoders, max_token_length, cache_to_disk, input_ids1, input_ids2, dtype
+    image_infos: List[ImageInfo],
+    tokenizers: List[CLIPTokenizer],
+    text_encoders: List[Union[CLIPTextModel, CLIPTextModelWithProjection]],
+    max_token_length: int,
+    cache_to_disk: bool,
+    input_ids1: torch.Tensor,
+    input_ids2: torch.Tensor,
+    dtype: torch.dtype,
+    device: torch.device,  # Add device parameter
 ):
-    input_ids1 = input_ids1.to(text_encoders[0].device)
-    input_ids2 = input_ids2.to(text_encoders[1].device)
+    # Move input_ids to the device
+    input_ids1 = input_ids1.to(device)
+    input_ids2 = input_ids2.to(device)
 
     with torch.no_grad():
         b_hidden_state1, b_hidden_state2, b_pool2 = get_hidden_states_sdxl(
@@ -3000,12 +3044,9 @@ def cache_batch_text_encoder_outputs(
             dtype,
         )
 
-        # ここでcpuに移動しておかないと、上書きされてしまう
-        b_hidden_state1 = b_hidden_state1.detach().to("cpu")  # b,n*75+2,768
-        b_hidden_state2 = b_hidden_state2.detach().to("cpu")  # b,n*75+2,1280
-        b_pool2 = b_pool2.detach().to("cpu")  # b,1280
-
-    for info, hidden_state1, hidden_state2, pool2 in zip(image_infos, b_hidden_state1, b_hidden_state2, b_pool2):
+    for info, hidden_state1, hidden_state2, pool2 in zip(
+        image_infos, b_hidden_state1.to("cpu"), b_hidden_state2.to("cpu"), b_pool2.to("cpu")
+    ):
         if cache_to_disk:
             save_text_encoder_outputs_to_disk(info.text_encoder_outputs_npz, hidden_state1, hidden_state2, pool2)
         else:
@@ -4554,27 +4595,16 @@ def read_config_from_file(args: argparse.Namespace, parser: argparse.ArgumentPar
 # region utils
 
 
-def resume_from_local_or_hf_if_specified(args, model, optimizer, lr_scheduler, current_step, current_epoch):
+def resume_from_local_or_hf_if_specified(accelerator, args):
     if not args.resume:
         return
 
     if not args.resume_from_huggingface:
-      if os.path.isfile(args.resume):
-        logger.info(f"resuming training from local checkpoint: {args.resume}")
-        checkpoint = torch.load(args.resume, map_location='cpu')
-        model.load_state_dict(checkpoint['model'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        if 'lr_scheduler' in checkpoint:
-          lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-        global_step = checkpoint.get('global_step', 0)
-        epoch = checkpoint.get('epoch', 0)
-        current_step.value = global_step
-        current_epoch.value = epoch
-      else:
-        logger.warning(f"Checkpoint {args.resume} not found, skipping resume")
-      return
+        logger.info(f"resume training from local state: {args.resume}")
+        accelerator.load_state(args.resume)
+        return
 
-    logger.info(f"resuming training from huggingface state: {args.resume}")
+    logger.info(f"resume training from huggingface state: {args.resume}")
     repo_id = args.resume.split("/")[0] + "/" + args.resume.split("/")[1]
     path_in_repo = "/".join(args.resume.split("/")[2:])
     revision = None
@@ -4615,22 +4645,7 @@ def resume_from_local_or_hf_if_specified(args, model, optimizer, lr_scheduler, c
             "No files found in the specified repo id/path/revision / 指定されたリポジトリID/パス/リビジョンにファイルが見つかりませんでした"
         )
     dirname = os.path.dirname(results[0])
-    # accelerator.load_state(dirname) # removed accelerator
-    # manually load the checkpoint
-    state_path = os.path.join(dirname, 'training_state.pt')
-    if os.path.isfile(state_path):
-        logger.info(f"loading state dict from {state_path}")
-        checkpoint = torch.load(state_path, map_location='cpu')
-        model.load_state_dict(checkpoint['model'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        if 'lr_scheduler' in checkpoint:
-          lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-        global_step = checkpoint.get('global_step', 0)
-        epoch = checkpoint.get('epoch', 0)
-        current_step.value = global_step
-        current_epoch.value = epoch
-    else:
-        logger.warning(f"Checkpoint {state_path} not found, skipping resume")
+    accelerator.load_state(dirname)
 
 
 def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
@@ -5275,11 +5290,40 @@ def prepare_accelerator(args: argparse.Namespace):
     if args.torch_compile:
         dynamo_backend = args.dynamo_backend
 
+    kwargs_handlers = [
+        (
+            InitProcessGroupKwargs(
+                backend="gloo" if os.name == "nt" or not torch.cuda.is_available() else "nccl",
+                init_method=(
+                    "env://?use_libuv=False" if os.name == "nt" and Version(torch.__version__) >= Version("2.4.0") else None
+                ),
+                timeout=datetime.timedelta(minutes=args.ddp_timeout) if args.ddp_timeout else None,
+            )
+            if torch.cuda.device_count() > 1
+            else None
+        ),
+        (
+            DistributedDataParallelKwargs(
+                gradient_as_bucket_view=args.ddp_gradient_as_bucket_view, static_graph=args.ddp_static_graph
+            )
+            if args.ddp_gradient_as_bucket_view or args.ddp_static_graph
+            else None
+        ),
+    ]
+    kwargs_handlers = [i for i in kwargs_handlers if i is not None]
     deepspeed_plugin = deepspeed_utils.prepare_deepspeed_plugin(args)
 
-    device = xm.xla_device()
-    #print("Training on XLA device:", device)
-    return device
+    accelerator = Accelerator(
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        mixed_precision=args.mixed_precision,
+        log_with=log_with,
+        project_dir=logging_dir,
+        kwargs_handlers=kwargs_handlers,
+        dynamo_backend=dynamo_backend,
+        deepspeed_plugin=deepspeed_plugin,
+    )
+    print("accelerator device:", accelerator.device)
+    return accelerator
 
 
 def prepare_dtype(args: argparse.Namespace):
@@ -5346,30 +5390,35 @@ def _load_target_model(args: argparse.Namespace, weight_dtype, device="cpu", une
     return text_encoder, vae, unet, load_stable_diffusion_format
 
 
-def load_target_model(args, weight_dtype, device, unet_use_linear_projection_in_v2=False): # add device parameter
-    for pi in range(xm.xrt_world_size()): # changed to xla_world_size
-        if pi == xm.get_ordinal(): #changed to xla_ordinal
-            logger.info(f"loading model for process {xm.get_ordinal()}/{xm.xrt_world_size()}") #changed to xla ordinal/xla_world_size
+def load_target_model(args, weight_dtype, accelerator, unet_use_linear_projection_in_v2=False):
+    for pi in range(accelerator.state.num_processes):
+        if pi == accelerator.state.local_process_index:
+            logger.info(f"loading model for process {accelerator.state.local_process_index}/{accelerator.state.num_processes}")
 
             text_encoder, vae, unet, load_stable_diffusion_format = _load_target_model(
                 args,
                 weight_dtype,
-                "cpu", # load to cpu first
+                accelerator.device if args.lowram else "cpu",
                 unet_use_linear_projection_in_v2=unet_use_linear_projection_in_v2,
             )
             # work on low-ram device
             if args.lowram:
-                text_encoder.to(device) # changed to xla device
-                unet.to(device)
-                vae.to(device) # changed to xla device
+                text_encoder.to(accelerator.device)
+                unet.to(accelerator.device)
+                vae.to(accelerator.device)
 
-            clean_memory_on_device(device) # changed to xla device
-        xm.rendezvous("load-target-model") # replace accelerator.wait_for_everyone()
+            clean_memory_on_device(accelerator.device)
+        accelerator.wait_for_everyone()
     return text_encoder, vae, unet, load_stable_diffusion_format
 
 
 def patch_accelerator_for_fp16_training(accelerator):
-    pass
+    org_unscale_grads = accelerator.scaler._unscale_grads_
+
+    def _unscale_grads_replacer(optimizer, inv_scale, found_inf, allow_fp16):
+        return org_unscale_grads(optimizer, inv_scale, found_inf, True)
+
+    accelerator.scaler._unscale_grads_ = _unscale_grads_replacer
 
 
 def get_hidden_states(args: argparse.Namespace, input_ids, tokenizer, text_encoder, weight_dtype=None):
@@ -5472,8 +5521,8 @@ def get_hidden_states_sdxl(
     tokenizer2: CLIPTokenizer,
     text_encoder1: CLIPTextModel,
     text_encoder2: CLIPTextModelWithProjection,
-    weight_dtype: Optional[torch.dtype] = None, # changed type string to torch.dtype
-    # accelerator: Optional[Accelerator] = None,  # Removed accelerator
+    weight_dtype: Optional[str] = None,
+    accelerator: Optional[Accelerator] = None,
 ):
     # input_ids: b,n,77 -> b*n, 77
     b_size = input_ids1.size()[0]
@@ -5489,8 +5538,8 @@ def get_hidden_states_sdxl(
     hidden_states2 = enc_out["hidden_states"][-2]  # penuultimate layer
 
     # pool2 = enc_out["text_embeds"]
-    # unwrapped_text_encoder2 = text_encoder2 if accelerator is None else accelerator.unwrap_model(text_encoder2) # removed accelerator
-    pool2 = pool_workaround(text_encoder2, enc_out["last_hidden_state"], input_ids2, tokenizer2.eos_token_id)
+    unwrapped_text_encoder2 = text_encoder2 if accelerator is None else accelerator.unwrap_model(text_encoder2)
+    pool2 = pool_workaround(unwrapped_text_encoder2, enc_out["last_hidden_state"], input_ids2, tokenizer2.eos_token_id)
 
     # b*n, 77, 768 or 1280 -> b, n*77, 768 or 1280
     n_size = 1 if max_token_length is None else max_token_length // 75
@@ -5527,8 +5576,6 @@ def get_hidden_states_sdxl(
         # this is required for additional network training
         hidden_states1 = hidden_states1.to(weight_dtype)
         hidden_states2 = hidden_states2.to(weight_dtype)
-        pool2 = pool2.to(weight_dtype)
-
 
     return hidden_states1, hidden_states2, pool2
 
@@ -5580,7 +5627,7 @@ def get_remove_step_no(args: argparse.Namespace, step_no: int):
 def save_sd_model_on_epoch_end_or_stepwise(
     args: argparse.Namespace,
     on_epoch_end: bool,
-    device,
+    accelerator,
     src_path: str,
     save_stable_diffusion_format: bool,
     use_safetensors: bool,
@@ -5606,7 +5653,7 @@ def save_sd_model_on_epoch_end_or_stepwise(
     save_sd_model_on_epoch_end_or_stepwise_common(
         args,
         on_epoch_end,
-        device, # changed to xla device
+        accelerator,
         save_stable_diffusion_format,
         use_safetensors,
         epoch,
@@ -5617,16 +5664,10 @@ def save_sd_model_on_epoch_end_or_stepwise(
     )
 
 
-import shutil
-import os
-import argparse
-from library import huggingface_util
-import torch
-
 def save_sd_model_on_epoch_end_or_stepwise_common(
     args: argparse.Namespace,
     on_epoch_end: bool,
-    device, # added device argument
+    accelerator,
     save_stable_diffusion_format: bool,
     use_safetensors: bool,
     epoch: int,
@@ -5705,12 +5746,12 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
 
     if args.save_state:
         if on_epoch_end:
-            save_and_remove_state_on_epoch_end(args, device, epoch_no) # modified function call
+            save_and_remove_state_on_epoch_end(args, accelerator, epoch_no)
         else:
-            save_and_remove_state_stepwise(args, device, global_step) # modified function call
+            save_and_remove_state_stepwise(args, accelerator, global_step)
 
 
-def save_and_remove_state_on_epoch_end(args: argparse.Namespace, device, epoch_no):
+def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, epoch_no):
     model_name = default_if_none(args.output_name, DEFAULT_EPOCH_NAME)
 
     logger.info("")
@@ -5718,7 +5759,7 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, device, epoch_n
     os.makedirs(args.output_dir, exist_ok=True)
 
     state_dir = os.path.join(args.output_dir, EPOCH_STATE_NAME.format(model_name, epoch_no))
-    # accelerator.save_state(state_dir) # removed accelerator
+    accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
         huggingface_util.upload(args, state_dir, "/" + EPOCH_STATE_NAME.format(model_name, epoch_no))
@@ -5732,7 +5773,7 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, device, epoch_n
             shutil.rmtree(state_dir_old)
 
 
-def save_and_remove_state_stepwise(args: argparse.Namespace, device, step_no):
+def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_no):
     model_name = default_if_none(args.output_name, DEFAULT_STEP_NAME)
 
     logger.info("")
@@ -5740,7 +5781,7 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, device, step_no):
     os.makedirs(args.output_dir, exist_ok=True)
 
     state_dir = os.path.join(args.output_dir, STEP_STATE_NAME.format(model_name, step_no))
-    # accelerator.save_state(state_dir) # removed accelerator
+    accelerator.save_state(state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
         huggingface_util.upload(args, state_dir, "/" + STEP_STATE_NAME.format(model_name, step_no))
@@ -5758,24 +5799,15 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, device, step_no):
                 shutil.rmtree(state_dir_old)
 
 
-def save_state_on_train_end(args, device): # added device arg
-    if args.save_state_on_train_end and not args.save_state:
-        args.save_state = True
-        logger.info("save_state_on_train_end is enabled, so saving state at the end of training / save_state_on_train_endが有効になっているため、学習終了時に状態を保存します")
+def save_state_on_train_end(args: argparse.Namespace, accelerator):
+    model_name = default_if_none(args.output_name, DEFAULT_LAST_OUTPUT_NAME)
 
-    if not args.save_state:
-        return
+    logger.info("")
+    logger.info("saving last state.")
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    save_dir = os.path.join(args.output_dir, "training_state")
-    os.makedirs(save_dir, exist_ok=True)
-    save_path = os.path.join(save_dir, "training_state.pt")
-    logger.info(f"saving training state to {save_path}")
-    state = {"args": vars(args)}
-    # add accelerator state if needed
-    # accelerator.save_state(save_path) # removed accelerator
-
-    torch.save(state, save_path) # save training arguments
-    logger.info(f"saved training state to {save_path}")
+    state_dir = os.path.join(args.output_dir, LAST_STATE_NAME.format(model_name))
+    accelerator.save_state(state_dir)
 
     if args.save_state_to_huggingface:
         logger.info("uploading last state to huggingface.")
@@ -6103,6 +6135,236 @@ def load_prompts(prompt_file: str) -> List[Dict]:
         prompt_dict.pop("subset", None)
 
     return prompts
+
+
+def sample_images_common(
+    pipe_class,
+    accelerator: Accelerator,
+    args: argparse.Namespace,
+    epoch: int,
+    steps: int,
+    device,
+    vae,
+    tokenizer,
+    text_encoder,
+    unet,
+    prompt_replacement=None,
+    controlnet=None,
+):
+    """
+    StableDiffusionLongPromptWeightingPipelineの改造版を使うようにしたので、clip skipおよびプロンプトの重みづけに対応した
+    TODO Use strategies here
+    """
+
+    if steps == 0:
+        if not args.sample_at_first:
+            return
+    else:
+        if args.sample_every_n_steps is None and args.sample_every_n_epochs is None:
+            return
+        if args.sample_every_n_epochs is not None:
+            # sample_every_n_steps は無視する
+            if epoch is None or epoch % args.sample_every_n_epochs != 0:
+                return
+        else:
+            if steps % args.sample_every_n_steps != 0 or epoch is not None:  # steps is not divisible or end of epoch
+                return
+
+    logger.info("")
+    logger.info(f"generating sample images at step / サンプル画像生成 ステップ: {steps}")
+    if not os.path.isfile(args.sample_prompts):
+        logger.error(f"No prompt file / プロンプトファイルがありません: {args.sample_prompts}")
+        return
+
+    distributed_state = PartialState()  # for multi gpu distributed inference. this is a singleton, so it's safe to use it here
+
+    org_vae_device = vae.device  # CPUにいるはず
+    vae.to(distributed_state.device)  # distributed_state.device is same as accelerator.device
+
+    # unwrap unet and text_encoder(s)
+    unet = accelerator.unwrap_model(unet)
+    if isinstance(text_encoder, (list, tuple)):
+        text_encoder = [accelerator.unwrap_model(te) for te in text_encoder]
+    else:
+        text_encoder = accelerator.unwrap_model(text_encoder)
+
+    # read prompts
+    if args.sample_prompts.endswith(".txt"):
+        with open(args.sample_prompts, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        prompts = [line.strip() for line in lines if len(line.strip()) > 0 and line[0] != "#"]
+    elif args.sample_prompts.endswith(".toml"):
+        with open(args.sample_prompts, "r", encoding="utf-8") as f:
+            data = toml.load(f)
+        prompts = [dict(**data["prompt"], **subset) for subset in data["prompt"]["subset"]]
+    elif args.sample_prompts.endswith(".json"):
+        with open(args.sample_prompts, "r", encoding="utf-8") as f:
+            prompts = json.load(f)
+
+    default_scheduler = get_my_scheduler(sample_sampler=args.sample_sampler, v_parameterization=args.v_parameterization)
+
+    pipeline = pipe_class(
+        text_encoder=text_encoder,
+        vae=vae,
+        unet=unet,
+        tokenizer=tokenizer,
+        scheduler=default_scheduler,
+        safety_checker=None,
+        feature_extractor=None,
+        requires_safety_checker=False,
+        clip_skip=args.clip_skip,
+    )
+    pipeline.to(distributed_state.device)
+    save_dir = args.output_dir + "/sample"
+    os.makedirs(save_dir, exist_ok=True)
+
+    # preprocess prompts
+    for i in range(len(prompts)):
+        prompt_dict = prompts[i]
+        if isinstance(prompt_dict, str):
+            prompt_dict = line_to_prompt_dict(prompt_dict)
+            prompts[i] = prompt_dict
+        assert isinstance(prompt_dict, dict)
+
+        # Adds an enumerator to the dict based on prompt position. Used later to name image files. Also cleanup of extra data in original prompt dict.
+        prompt_dict["enum"] = i
+        prompt_dict.pop("subset", None)
+
+    # save random state to restore later
+    rng_state = torch.get_rng_state()
+    cuda_rng_state = None
+    try:
+        cuda_rng_state = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+    except Exception:
+        pass
+
+    if distributed_state.num_processes <= 1:
+        # If only one device is available, just use the original prompt list. We don't need to care about the distribution of prompts.
+        with torch.no_grad():
+            for prompt_dict in prompts:
+                sample_image_inference(
+                    accelerator, args, pipeline, save_dir, prompt_dict, epoch, steps, prompt_replacement, controlnet=controlnet
+                )
+    else:
+        # Creating list with N elements, where each element is a list of prompt_dicts, and N is the number of processes available (number of devices available)
+        # prompt_dicts are assigned to lists based on order of processes, to attempt to time the image creation time to match enum order. Probably only works when steps and sampler are identical.
+        per_process_prompts = []  # list of lists
+        for i in range(distributed_state.num_processes):
+            per_process_prompts.append(prompts[i :: distributed_state.num_processes])
+
+        with torch.no_grad():
+            with distributed_state.split_between_processes(per_process_prompts) as prompt_dict_lists:
+                for prompt_dict in prompt_dict_lists[0]:
+                    sample_image_inference(
+                        accelerator, args, pipeline, save_dir, prompt_dict, epoch, steps, prompt_replacement, controlnet=controlnet
+                    )
+
+    # clear pipeline and cache to reduce vram usage
+    del pipeline
+
+    torch.set_rng_state(rng_state)
+    if torch.cuda.is_available() and cuda_rng_state is not None:
+        torch.cuda.set_rng_state(cuda_rng_state)
+    vae.to(org_vae_device)
+
+    clean_memory_on_device(accelerator.device)
+
+
+def sample_image_inference(
+    accelerator: Accelerator,
+    args: argparse.Namespace,
+    pipeline: Union[StableDiffusionLongPromptWeightingPipeline, SdxlStableDiffusionLongPromptWeightingPipeline],
+    save_dir,
+    prompt_dict,
+    epoch,
+    steps,
+    prompt_replacement,
+    controlnet=None,
+):
+    assert isinstance(prompt_dict, dict)
+    negative_prompt = prompt_dict.get("negative_prompt")
+    sample_steps = prompt_dict.get("sample_steps", 30)
+    width = prompt_dict.get("width", 512)
+    height = prompt_dict.get("height", 512)
+    scale = prompt_dict.get("scale", 7.5)
+    seed = prompt_dict.get("seed")
+    controlnet_image = prompt_dict.get("controlnet_image")
+    prompt: str = prompt_dict.get("prompt", "")
+    sampler_name: str = prompt_dict.get("sample_sampler", args.sample_sampler)
+
+    if prompt_replacement is not None:
+        prompt = prompt.replace(prompt_replacement[0], prompt_replacement[1])
+        if negative_prompt is not None:
+            negative_prompt = negative_prompt.replace(prompt_replacement[0], prompt_replacement[1])
+
+    if seed is not None:
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+    else:
+        # True random sample image generation
+        torch.seed()
+        if torch.cuda.is_available():
+            torch.cuda.seed()
+
+    scheduler = get_my_scheduler(
+        sample_sampler=sampler_name,
+        v_parameterization=args.v_parameterization,
+    )
+    pipeline.scheduler = scheduler
+
+    if controlnet_image is not None:
+        controlnet_image = Image.open(controlnet_image).convert("RGB")
+        controlnet_image = controlnet_image.resize((width, height), Image.LANCZOS)
+
+    height = max(64, height - height % 8)  # round to divisible by 8
+    width = max(64, width - width % 8)  # round to divisible by 8
+    logger.info(f"prompt: {prompt}")
+    logger.info(f"negative_prompt: {negative_prompt}")
+    logger.info(f"height: {height}")
+    logger.info(f"width: {width}")
+    logger.info(f"sample_steps: {sample_steps}")
+    logger.info(f"scale: {scale}")
+    logger.info(f"sample_sampler: {sampler_name}")
+    if seed is not None:
+        logger.info(f"seed: {seed}")
+    with accelerator.autocast():
+        latents = pipeline(
+            prompt=prompt,
+            height=height,
+            width=width,
+            num_inference_steps=sample_steps,
+            guidance_scale=scale,
+            negative_prompt=negative_prompt,
+            controlnet=controlnet,
+            controlnet_image=controlnet_image,
+        )
+
+    if torch.cuda.is_available():
+        with torch.cuda.device(torch.cuda.current_device()):
+            torch.cuda.empty_cache()
+
+    image = pipeline.latents_to_image(latents)[0]
+
+    # adding accelerator.wait_for_everyone() here should sync up and ensure that sample images are saved in the same order as the original prompt list
+    # but adding 'enum' to the filename should be enough
+
+    ts_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
+    num_suffix = f"e{epoch:06d}" if epoch is not None else f"{steps:06d}"
+    seed_suffix = "" if seed is None else f"_{seed}"
+    i: int = prompt_dict["enum"]
+    img_filename = f"{'' if args.output_name is None else args.output_name + '_'}{num_suffix}_{i:02d}_{ts_str}{seed_suffix}.png"
+    image.save(os.path.join(save_dir, img_filename))
+
+    # send images to wandb if enabled
+    if "wandb" in [tracker.name for tracker in accelerator.trackers]:
+        wandb_tracker = accelerator.get_tracker("wandb")
+
+        import wandb
+
+        # not to commit images to avoid inconsistency between training and logging steps
+        wandb_tracker.log({f"sample_{i}": wandb.Image(image, caption=prompt)}, commit=False)  # positive prompt as a caption
+
 
 # endregion
 
