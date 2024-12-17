@@ -1,6 +1,6 @@
 torch==2.5.0
 torchvision==0.20.0
-accelerate==0.33.0
+#accelerate==0.33.0
 transformers
 diffusers[torch]
 ftfy
@@ -9,8 +9,8 @@ opencv-python
 einops
 pytorch-lightning
 bitsandbytes
-prodigyopt
-lion-pytorch
+#prodigyopt
+#lion-pytorch
 schedulefree
 tensorboard
 safetensors
