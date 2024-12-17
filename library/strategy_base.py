@@ -487,6 +487,7 @@ class LatentsCachingStrategy:
             img_tensor = torch.flip(img_tensor, dims=[3])
             with torch.no_grad():
                 flipped_latents = encode_by_vae(img_tensor).to("cpu")
+                print("Moved flipped latents to CPU")  # Add this line for debugging
         else:
             flipped_latents = [None] * len(latents_tensors)
 
