@@ -19,7 +19,6 @@ from einops import rearrange
 from torch import Tensor, nn
 from torch.utils.checkpoint import checkpoint
 
-
 from library import custom_offloading_utils
 
 # USE_REENTRANT = True
@@ -563,7 +562,6 @@ class MLPEmbedder(nn.Module):
         return self.out_layer(self.silu(self.in_layer(x)))
 
     def forward(self, *args, **kwargs):
-        import torch_xla.core.xla_model as xm
         if self.training and self.gradient_checkpointing:
             return checkpoint(self._forward, *args, use_reentrant=False, **kwargs)
         else:
@@ -640,8 +638,6 @@ class Modulation(nn.Module):
         self.lin = nn.Linear(dim, self.multiplier * dim, bias=True)
 
     def forward(self, vec: Tensor) -> tuple[ModulationOut, ModulationOut | None]:
-        if vec.device != self.lin.weight.device or vec.dtype != self.lin.weight.dtype:
-            vec = vec.to(device=self.lin.weight.device, dtype=self.lin.weight.dtype)
         out = self.lin(nn.functional.silu(vec))[:, None, :].chunk(self.multiplier, dim=-1)
 
         return (
@@ -681,7 +677,6 @@ class DoubleStreamBlock(nn.Module):
 
         self.gradient_checkpointing = False
         self.cpu_offload_checkpointing = False
-        self.device = "cpu"
 
     def enable_gradient_checkpointing(self, cpu_offload: bool = False):
         self.gradient_checkpointing = True
@@ -691,48 +686,59 @@ class DoubleStreamBlock(nn.Module):
         self.gradient_checkpointing = False
         self.cpu_offload_checkpointing = False
 
-    def to(self, *args, **kwargs):
-        self = super().to(*args, **kwargs)
-        # Modified to handle the case where more than 3 values are returned
-        parsed_args = torch._C._nn._parse_to(*args, **kwargs)
-        self.device = parsed_args[0] if isinstance(parsed_args[0], torch.device) else None
-        return self
-
     def _forward(
         self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, txt_attention_mask: Optional[Tensor] = None
     ) -> tuple[Tensor, Tensor]:
-        vec = vec.to(self.device) # use self.device here
         img_mod1, img_mod2 = self.img_mod(vec)
         txt_mod1, txt_mod2 = self.txt_mod(vec)
 
         # prepare image for attention
-        h_img = img
-        h_img = h_img + img_mod1.scale * self.pe_embedder(pe, ids=self.img_ids)
-        img_attn_in = self.img_attn_in(h_img, img_mod1.shift, img_mod2)
+        img_modulated = self.img_norm1(img)
+        img_modulated = (1 + img_mod1.scale) * img_modulated + img_mod1.shift
+        img_qkv = self.img_attn.qkv(img_modulated)
+        img_q, img_k, img_v = rearrange(img_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+        img_q, img_k = self.img_attn.norm(img_q, img_k, img_v)
 
-        # prepare text for attention
-        h_txt = txt
-        h_txt = h_txt + txt_mod1.scale * self.pe_embedder(pe, ids=self.txt_ids)
-        txt_attn_in = self.txt_attn_in(h_txt, txt_mod1.shift, txt_mod2)
+        # prepare txt for attention
+        txt_modulated = self.txt_norm1(txt)
+        txt_modulated = (1 + txt_mod1.scale) * txt_modulated + txt_mod1.shift
+        txt_qkv = self.txt_attn.qkv(txt_modulated)
+        txt_q, txt_k, txt_v = rearrange(txt_qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
+        txt_q, txt_k = self.txt_attn.norm(txt_q, txt_k, txt_v)
 
-        # attention
-        img_attn_out, txt_attn_out = self.attn(
-            img_attn_in, txt_attn_in, img_mod2.scale, txt_mod2.scale, txt_attention_mask
-        )
+        # run actual attention
+        q = torch.cat((txt_q, img_q), dim=2)
+        k = torch.cat((txt_k, img_k), dim=2)
+        v = torch.cat((txt_v, img_v), dim=2)
 
-        # mlp
-        img_mlp_in = self.img_mlp_in(h_img, img_mod1.shift, img_mod2)
-        txt_mlp_in = self.txt_mlp_in(h_txt, txt_mod1.shift, txt_mod2)
-        img_mlp_out = self.img_mlp(img_mlp_in)
-        txt_mlp_out = self.txt_mlp(txt_mlp_in)
+        # make attention mask if not None
+        attn_mask = None
+        if txt_attention_mask is not None:
+            # F.scaled_dot_product_attention expects attn_mask to be bool for binary mask
+            attn_mask = txt_attention_mask.to(torch.bool)  # b, seq_len
+            attn_mask = torch.cat(
+                (attn_mask, torch.ones(attn_mask.shape[0], img.shape[1], device=attn_mask.device, dtype=torch.bool)), dim=1
+            )  # b, seq_len + img_len
 
-        return img + img_attn_out + img_mlp_out, txt + txt_attn_out + txt_mlp_out
+            # broadcast attn_mask to all heads
+            attn_mask = attn_mask[:, None, None, :].expand(-1, q.shape[1], q.shape[2], -1)
+
+        attn = attention(q, k, v, pe=pe, attn_mask=attn_mask)
+        txt_attn, img_attn = attn[:, : txt.shape[1]], attn[:, txt.shape[1] :]
+
+        # calculate the img blocks
+        img = img + img_mod1.gate * self.img_attn.proj(img_attn)
+        img = img + img_mod2.gate * self.img_mlp((1 + img_mod2.scale) * self.img_norm2(img) + img_mod2.shift)
+
+        # calculate the txt blocks
+        txt = txt + txt_mod1.gate * self.txt_attn.proj(txt_attn)
+        txt = txt + txt_mod2.gate * self.txt_mlp((1 + txt_mod2.scale) * self.txt_norm2(txt) + txt_mod2.shift)
+        return img, txt
 
     def forward(
         self, img: Tensor, txt: Tensor, vec: Tensor, pe: Tensor, txt_attention_mask: Optional[Tensor] = None
     ) -> tuple[Tensor, Tensor]:
         if self.training and self.gradient_checkpointing:
-            import torch_xla.core.xla_model as xm
             if not self.cpu_offload_checkpointing:
                 return checkpoint(self._forward, img, txt, vec, pe, txt_attention_mask, use_reentrant=False)
             # cpu offload checkpointing
@@ -832,7 +838,6 @@ class SingleStreamBlock(nn.Module):
 
     def forward(self, x: Tensor, vec: Tensor, pe: Tensor, txt_attention_mask: Optional[Tensor] = None) -> Tensor:
         if self.training and self.gradient_checkpointing:
-            import torch_xla.core.xla_model as xm
             if not self.cpu_offload_checkpointing:
                 return checkpoint(self._forward, x, vec, pe, txt_attention_mask, use_reentrant=False)
 
@@ -875,7 +880,7 @@ class Flux(nn.Module):
     Transformer model for flow matching on sequences.
     """
 
-    def __init__(self, params: FluxParams, device: Union[str, torch.device] = "cpu"):
+    def __init__(self, params: FluxParams):
         super().__init__()
 
         self.params = params
@@ -925,22 +930,6 @@ class Flux(nn.Module):
         self.num_double_blocks = len(self.double_blocks)
         self.num_single_blocks = len(self.single_blocks)
 
-         # Initialize all sub-modules on the CPU to avoid immediately placing them on the device
-        self.pe_embedder.to("cpu")
-        self.img_in.to("cpu")
-        self.time_in.to("cpu")
-        self.vector_in.to("cpu")
-        if self.params.guidance_embed:
-            self.guidance_in.to("cpu")
-        self.txt_in.to("cpu")
-
-        for block in self.double_blocks:
-            block.to("cpu")
-        for block in self.single_blocks:
-            block.to("cpu")
-
-        self.final_layer.to("cpu")
-
     @property
     def device(self):
         return next(self.parameters()).device
@@ -977,71 +966,45 @@ class Flux(nn.Module):
 
         print("FLUX: Gradient checkpointing disabled.")
 
-    def get_device(self):
-        return next(self.parameters()).device
+    def enable_block_swap(self, num_blocks: int, device: torch.device):
+        self.blocks_to_swap = num_blocks
+        double_blocks_to_swap = num_blocks // 2
+        single_blocks_to_swap = (num_blocks - double_blocks_to_swap) * 2
 
-    def enable_block_swap(self, blocks_to_swap: int, device: torch.device):
-        self.blocks_to_swap = blocks_to_swap
-        double_blocks_to_swap = blocks_to_swap // 2
-        single_blocks_to_swap = (blocks_to_swap - double_blocks_to_swap) * 2
-
-        assert double_blocks_to_swap <= self.num_double_blocks - 1 and single_blocks_to_swap <= self.num_single_blocks - 1, (
-            f"Cannot swap more than {self.num_double_blocks - 1} double blocks and {self.num_single_blocks - 1} single blocks. "
+        assert double_blocks_to_swap <= self.num_double_blocks - 2 and single_blocks_to_swap <= self.num_single_blocks - 2, (
+            f"Cannot swap more than {self.num_double_blocks - 2} double blocks and {self.num_single_blocks - 2} single blocks. "
             f"Requested {double_blocks_to_swap} double blocks and {single_blocks_to_swap} single blocks."
         )
 
         self.offloader_double = custom_offloading_utils.ModelOffloader(
-            self.double_blocks, self.num_double_blocks, double_blocks_to_swap, device, debug=True
+            self.double_blocks, self.num_double_blocks, double_blocks_to_swap, device  # , debug=True
         )
         self.offloader_single = custom_offloading_utils.ModelOffloader(
-            self.single_blocks, self.num_single_blocks, single_blocks_to_swap, device, debug=False
+            self.single_blocks, self.num_single_blocks, single_blocks_to_swap, device  # , debug=True
         )
-        # removed self.device = device
         print(
-            f"FLUX: Block swap enabled. Swapping {blocks_to_swap} blocks, double blocks: {double_blocks_to_swap}, single blocks: {single_blocks_to_swap}."
+            f"FLUX: Block swap enabled. Swapping {num_blocks} blocks, double blocks: {double_blocks_to_swap}, single blocks: {single_blocks_to_swap}."
         )
 
     def move_to_device_except_swap_blocks(self, device: torch.device):
-        # Move the main parts of the model to the device
-        self.pe_embedder.to(device)
-        self.img_in.to(device)
-        self.time_in.to(device)
-        self.vector_in.to(device)
-        if self.params.guidance_embed:
-            self.guidance_in.to(device)
-        self.txt_in.to(device)
-        self.final_layer.to(device)
-
-        # Handle the blocks that will be swapped
+        # assume model is on cpu. do not move blocks to device to reduce temporary memory usage
         if self.blocks_to_swap:
-            # Ensure the blocks that will be swapped are on the CPU initially
-            for block in self.double_blocks:
-                custom_offloading_utils.weighs_to_device(block, torch.device("cpu")) # change to torch.device("cpu")
-            for block in self.single_blocks:
-                custom_offloading_utils.weighs_to_device(block, torch.device("cpu")) # change to torch.device("cpu")
+            save_double_blocks = self.double_blocks
+            save_single_blocks = self.single_blocks
+            self.double_blocks = None
+            self.single_blocks = None
 
-            # Move only the necessary blocks to the device
-            num_blocks_to_load = self.num_double_blocks - self.blocks_to_swap // 2
-            for i in range(num_blocks_to_load):
-                self.double_blocks[i].to(device)
+        self.to(device)
 
-            num_single_blocks_to_load = self.num_single_blocks - (self.blocks_to_swap - self.blocks_to_swap // 2) * 2
-            for i in range(num_single_blocks_to_load):
-                self.single_blocks[i].to(device)
-
-            # Initialize offloaders if not already initialized
-            if self.offloader_double is None:
-                self.offloader_double = custom_offloading_utils.ModelOffloader(
-                    self.double_blocks, self.num_double_blocks, self.blocks_to_swap // 2, device, debug=True
-                )
-            if self.offloader_single is None:
-                self.offloader_single = custom_offloading_utils.ModelOffloader(
-                    self.single_blocks, self.num_single_blocks, (self.blocks_to_swap - self.blocks_to_swap // 2) * 2, device, debug=False
-                )
+        if self.blocks_to_swap:
+            self.double_blocks = save_double_blocks
+            self.single_blocks = save_single_blocks
 
     def prepare_block_swap_before_forward(self):
         if self.blocks_to_swap is None or self.blocks_to_swap == 0:
             return
+        if self.offloader_double.xla_available:
+            print("Using XLA for block swapping")
         self.offloader_double.prepare_block_devices_before_forward(self.double_blocks)
         self.offloader_single.prepare_block_devices_before_forward(self.single_blocks)
 
@@ -1091,9 +1054,7 @@ class Flux(nn.Module):
                     img = img + block_controlnet_single_hidden_states[block_idx % controlnet_single_depth]
         else:
             for block_idx, block in enumerate(self.double_blocks):
-                # Move the necessary blocks to the device just before they are used
-                self.offloader_double.prepare_for_block(block_idx)
-                self.offloader_double.move_to_device_for_block(block, self.device)
+                self.offloader_double.wait_for_block(block_idx)
 
                 img, txt = block(img=img, txt=txt, vec=vec, pe=pe, txt_attention_mask=txt_attention_mask)
                 if block_controlnet_hidden_states is not None and controlnet_depth > 0:
@@ -1104,9 +1065,7 @@ class Flux(nn.Module):
             img = torch.cat((txt, img), 1)
 
             for block_idx, block in enumerate(self.single_blocks):
-                # Move the necessary single block to the device just before it is used
-                self.offloader_single.prepare_for_block(block_idx)
-                self.offloader_single.move_to_device_for_block(block, self.device)
+                self.offloader_single.wait_for_block(block_idx)
 
                 img = block(img, vec=vec, pe=pe, txt_attention_mask=txt_attention_mask)
                 if block_controlnet_single_hidden_states is not None and controlnet_single_depth > 0:
@@ -1115,6 +1074,10 @@ class Flux(nn.Module):
                 self.offloader_single.submit_move_blocks(self.single_blocks, block_idx)
 
         img = img[:, txt.shape[1] :, ...]
+
+        if self.training and self.cpu_offload_checkpointing:
+            img = img.to(self.device)
+            vec = vec.to(self.device)
 
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
 
@@ -1359,174 +1322,3 @@ class ControlNetFlux(nn.Module):
             controlnet_single_block_samples = controlnet_single_block_samples + (block_sample,)
 
         return controlnet_block_samples, controlnet_single_block_samples
-
-
-"""
-class FluxUpper(nn.Module):
-    ""
-    Transformer model for flow matching on sequences.
-    ""
-
-    def __init__(self, params: FluxParams):
-        super().__init__()
-
-        self.params = params
-        self.in_channels = params.in_channels
-        self.out_channels = self.in_channels
-        if params.hidden_size % params.num_heads != 0:
-            raise ValueError(f"Hidden size {params.hidden_size} must be divisible by num_heads {params.num_heads}")
-        pe_dim = params.hidden_size // params.num_heads
-        if sum(params.axes_dim) != pe_dim:
-            raise ValueError(f"Got {params.axes_dim} but expected positional dim {pe_dim}")
-        self.hidden_size = params.hidden_size
-        self.num_heads = params.num_heads
-        self.pe_embedder = EmbedND(dim=pe_dim, theta=params.theta, axes_dim=params.axes_dim)
-        self.img_in = nn.Linear(self.in_channels, self.hidden_size, bias=True)
-        self.time_in = MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size)
-        self.vector_in = MLPEmbedder(params.vec_in_dim, self.hidden_size)
-        self.guidance_in = MLPEmbedder(in_dim=256, hidden_dim=self.hidden_size) if params.guidance_embed else nn.Identity()
-        self.txt_in = nn.Linear(params.context_in_dim, self.hidden_size)
-
-        self.double_blocks = nn.ModuleList(
-            [
-                DoubleStreamBlock(
-                    self.hidden_size,
-                    self.num_heads,
-                    mlp_ratio=params.mlp_ratio,
-                    qkv_bias=params.qkv_bias,
-                )
-                for _ in range(params.depth)
-            ]
-        )
-
-        self.gradient_checkpointing = False
-
-    @property
-    def device(self):
-        return next(self.parameters()).device
-
-    @property
-    def dtype(self):
-        return next(self.parameters()).dtype
-
-    def enable_gradient_checkpointing(self):
-        self.gradient_checkpointing = True
-
-        self.time_in.enable_gradient_checkpointing()
-        self.vector_in.enable_gradient_checkpointing()
-        if self.guidance_in.__class__ != nn.Identity:
-            self.guidance_in.enable_gradient_checkpointing()
-
-        for block in self.double_blocks:
-            block.enable_gradient_checkpointing()
-
-        print("FLUX: Gradient checkpointing enabled.")
-
-    def disable_gradient_checkpointing(self):
-        self.gradient_checkpointing = False
-
-        self.time_in.disable_gradient_checkpointing()
-        self.vector_in.disable_gradient_checkpointing()
-        if self.guidance_in.__class__ != nn.Identity:
-            self.guidance_in.disable_gradient_checkpointing()
-
-        for block in self.double_blocks:
-            block.disable_gradient_checkpointing()
-
-        print("FLUX: Gradient checkpointing disabled.")
-
-    def forward(
-        self,
-        img: Tensor,
-        img_ids: Tensor,
-        txt: Tensor,
-        txt_ids: Tensor,
-        timesteps: Tensor,
-        y: Tensor,
-        guidance: Tensor | None = None,
-        txt_attention_mask: Tensor | None = None,
-    ) -> Tensor:
-        if img.ndim != 3 or txt.ndim != 3:
-            raise ValueError("Input img and txt tensors must have 3 dimensions.")
-
-        # running on sequences img
-        img = self.img_in(img)
-        vec = self.time_in(timestep_embedding(timesteps, 256))
-        if self.params.guidance_embed:
-            if guidance is None:
-                raise ValueError("Didn't get guidance strength for guidance distilled model.")
-            vec = vec + self.guidance_in(timestep_embedding(guidance, 256))
-        vec = vec + self.vector_in(y)
-        txt = self.txt_in(txt)
-
-        ids = torch.cat((txt_ids, img_ids), dim=1)
-        pe = self.pe_embedder(ids)
-
-        for block in self.double_blocks:
-            img, txt = block(img=img, txt=txt, vec=vec, pe=pe, txt_attention_mask=txt_attention_mask)
-
-        return img, txt, vec, pe
-
-
-class FluxLower(nn.Module):
-    ""
-    Transformer model for flow matching on sequences.
-    ""
-
-    def __init__(self, params: FluxParams):
-        super().__init__()
-        self.hidden_size = params.hidden_size
-        self.num_heads = params.num_heads
-        self.out_channels = params.in_channels
-
-        self.single_blocks = nn.ModuleList(
-            [
-                SingleStreamBlock(self.hidden_size, self.num_heads, mlp_ratio=params.mlp_ratio)
-                for _ in range(params.depth_single_blocks)
-            ]
-        )
-
-        self.final_layer = LastLayer(self.hidden_size, 1, self.out_channels)
-
-        self.gradient_checkpointing = False
-
-    @property
-    def device(self):
-        return next(self.parameters()).device
-
-    @property
-    def dtype(self):
-        return next(self.parameters()).dtype
-
-    def enable_gradient_checkpointing(self):
-        self.gradient_checkpointing = True
-
-        for block in self.single_blocks:
-            block.enable_gradient_checkpointing()
-
-        print("FLUX: Gradient checkpointing enabled.")
-
-    def disable_gradient_checkpointing(self):
-        self.gradient_checkpointing = False
-
-        for block in self.single_blocks:
-            block.disable_gradient_checkpointing()
-
-        print("FLUX: Gradient checkpointing disabled.")
-
-    def forward(
-        self,
-        img: Tensor,
-        txt: Tensor,
-        vec: Tensor | None = None,
-        pe: Tensor | None = None,
-        txt_attention_mask: Tensor | None = None,
-    ) -> Tensor:
-        img = torch.cat((txt, img), 1)
-        for block in self.single_blocks:
-            img = block(img, vec=vec, pe=pe, txt_attention_mask=txt_attention_mask)
-        img = img[:, txt.shape[1] :, ...]
-
-        img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
-        return img
-"""

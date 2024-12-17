@@ -297,7 +297,6 @@ def train(args):
     if is_swapping_blocks:
         logger.info(f"enable block swap: blocks_to_swap={args.blocks_to_swap}")
         flux.enable_block_swap(args.blocks_to_swap, device)
-        #flux.move_to_device_except_swap_blocks(device) # added this line after enabling block swapping
 
     if not cache_latents:
         # load VAE here if not cached
@@ -449,9 +448,10 @@ def train(args):
     if args.deepspeed:
         raise ValueError("Deepspeed is not supported for XLA, use native XLA implementation instead.")
     else:
-        flux = xm.MpModelWrapper(flux)
+        flux = xm.MpModelWrapper(flux).to(device)
         if is_swapping_blocks:
             flux.move_to_device_except_swap_blocks(device)  # reduce peak memory usage
+            
 
     if args.fused_backward_pass:
         import library.adafactor_fused

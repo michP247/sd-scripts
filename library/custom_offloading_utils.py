@@ -5,11 +5,14 @@ import torch
 import torch.nn as nn
 
 import torch_xla.core.xla_model as xm
+from library.device_utils import clean_memory_on_device
 
 def print_block_size(block, name=""):
-    total_params = sum(p.numel() for p in block.parameters())
-    size_in_bytes = total_params * 4  # Assuming float32
-    size_in_mb = size_in_bytes / (1024**2)
+    total_size_in_bytes = 0
+    for p in block.parameters():
+        param_size_in_bytes = p.numel() * (2 if p.dtype == torch.bfloat16 else 4)  # Check dtype
+        total_size_in_bytes += param_size_in_bytes
+    size_in_mb = total_size_in_bytes / (1024**2)
     print(f"Block {name}: {size_in_mb:.2f} MB")
 
 def synchronize_device(device: torch.device):
@@ -62,7 +65,6 @@ def swap_weight_devices_xla(device: torch.device, layer_to_cpu: nn.Module, layer
     """
     assert layer_to_cpu.__class__ == layer_to_xla.__class__
 
-    # Use a dictionary to track modules by name for easier lookup
     modules_to_cpu = {k: v for k, v in layer_to_cpu.named_modules()}
 
     for module_to_xla_name, module_to_xla in layer_to_xla.named_modules():
@@ -70,28 +72,31 @@ def swap_weight_devices_xla(device: torch.device, layer_to_cpu: nn.Module, layer
             module_to_cpu = modules_to_cpu.get(module_to_xla_name, None)
             if (
                 module_to_cpu is not None
+                and hasattr(module_to_cpu, "weight") # Check if module_to_cpu also has a weight
                 and module_to_cpu.weight is not None
                 and module_to_cpu.weight.shape == module_to_xla.weight.shape
             ):
-                # Swap weights and move to the appropriate device
+                print(f"Swapping weights for module: {module_to_xla_name}")
+
                 module_to_cpu.weight.data, module_to_xla.weight.data = (
                     module_to_xla.weight.data,
                     module_to_cpu.weight.data,
                 )
                 module_to_cpu.weight.data = module_to_cpu.weight.data.to("cpu", non_blocking=False)
                 module_to_xla.weight.data = module_to_xla.weight.data.to(device, non_blocking=False)
+
+                print(f"Moved {module_to_xla_name}.weight to CPU")
+                print(f"Moved {module_to_xla_name}.weight to {device}")
             else:
-                # Move modules not found in the CPU model to the device
                 if module_to_xla.weight.data.device.type != device.type:
                     module_to_xla.weight.data = module_to_xla.weight.data.to(device)
+                    print(f"Moved {module_to_xla_name}.weight to {device}")
 
-    # Synchronize after swapping
     xm.mark_step()
+    print("XLA mark_step() called after weight swapping")
 
 def weighs_to_device(layer: nn.Module, device: torch.device):
-    for module in layer.modules():
-        if hasattr(module, "weight") and module.weight is not None:
-            module.weight.data = module.weight.data.to(device, non_blocking=True)
+    layer.to(device, non_blocking=True)
 
 class Offloader:
     """
@@ -208,17 +213,16 @@ class ModelOffloader(Offloader):
 
         for i, b in enumerate(blocks[: self.num_blocks - self.blocks_to_swap]):
             print_block_size(b, name=f"Initial XLA-bound (idx {i})")
-            b.to(self.device)
-            weighs_to_device(b, self.device)  # make sure weights are on device
+            # b.to(self.device)  # Remove this line
+            weighs_to_device(b, self.device)
 
         for i, b in enumerate(blocks[self.num_blocks - self.blocks_to_swap :]):
             print_block_size(b, name=f"Initial CPU-bound (idx {i})")
-            b.to(self.device)  # move block to device first
-            weighs_to_device(b, "cpu")  # make sure weights are on cpu
+            # b.to(self.device)  # Remove this line
+            weighs_to_device(b, "cpu")
 
         synchronize_device(self.device)
-        if self.xla_available:
-            xm.mark_step()
+        clean_memory_on_device(self.device)
 
     def wait_for_block(self, block_idx: int):
         if self.blocks_to_swap is None or self.blocks_to_swap == 0:
@@ -230,6 +234,9 @@ class ModelOffloader(Offloader):
             return
         if block_idx >= self.blocks_to_swap:
             return
+
+        xm.rendezvous("move_block_start")  # Add a synchronization barrier before moving blocks
+
         block_idx_to_cpu = block_idx
         block_idx_to_cuda = self.num_blocks - self.blocks_to_swap + block_idx
         self._submit_move_blocks(blocks, block_idx_to_cpu, block_idx_to_cuda)
