@@ -24,6 +24,9 @@ from typing import (
     Union
 )
 from accelerate import Accelerator, InitProcessGroupKwargs, DistributedDataParallelKwargs, PartialState
+import torch_xla.core.xla_model as xm
+import torch_xla.distributed.parallel_loader as pl
+from torch_xla.distributed.distributed_optimizer import DistributedOptimizer
 import glob
 import math
 import os
@@ -2402,8 +2405,8 @@ class ControlNetDataset(BaseDataset):
     def cache_latents(self, vae, vae_batch_size=1, cache_to_disk=False, is_main_process=True):
         return self.dreambooth_dataset_delegate.cache_latents(vae, vae_batch_size, cache_to_disk, is_main_process)
 
-    def new_cache_latents(self, model: Any, accelerator: Accelerator):
-        return self.dreambooth_dataset_delegate.new_cache_latents(model, accelerator)
+    def new_cache_latents(self, model: Any, device: torch.device):
+        return self.dreambooth_dataset_delegate.new_cache_latents(model, device)
 
     def new_cache_text_encoder_outputs(self, models: List[Any], is_main_process: bool):
         return self.dreambooth_dataset_delegate.new_cache_text_encoder_outputs(models, is_main_process)
@@ -2507,11 +2510,11 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
             logger.info(f"[Dataset {i}]")
             dataset.cache_latents(vae, vae_batch_size, cache_to_disk, is_main_process, file_suffix)
 
-    def new_cache_latents(self, model: Any, accelerator: Accelerator):
+    def new_cache_latents(self, model: Any, device: torch.device):
         for i, dataset in enumerate(self.datasets):
             logger.info(f"[Dataset {i}]")
-            dataset.new_cache_latents(model, accelerator)
-        accelerator.wait_for_everyone()
+            dataset.new_cache_latents(model, device)
+        xm.mark_step()
 
     def cache_text_encoder_outputs(
         self, tokenizers, text_encoders, device, weight_dtype, cache_to_disk=False, is_main_process=True
@@ -2529,11 +2532,11 @@ class DatasetGroup(torch.utils.data.ConcatDataset):
                 tokenizer, text_encoders, device, output_dtype, te_dtypes, cache_to_disk, is_main_process, batch_size
             )
 
-    def new_cache_text_encoder_outputs(self, models: List[Any], accelerator: Accelerator):
+    def new_cache_text_encoder_outputs(self, models: List[Any], device: torch.device):
         for i, dataset in enumerate(self.datasets):
             logger.info(f"[Dataset {i}]")
-            dataset.new_cache_text_encoder_outputs(models, accelerator)
-        accelerator.wait_for_everyone()
+            dataset.new_cache_text_encoder_outputs(models, device)
+        xm.mark_step()
 
     def set_caching_mode(self, caching_mode):
         for dataset in self.datasets:
@@ -3035,8 +3038,8 @@ def cache_batch_text_encoder_outputs(
     with torch.no_grad():
         b_hidden_state1, b_hidden_state2, b_pool2 = get_hidden_states_sdxl(
             max_token_length,
-            input_ids1,
-            input_ids2,
+            input_ids1.to(text_encoders[0].device),
+            input_ids2.to(text_encoders[1].device),
             tokenizers[0],
             tokenizers[1],
             text_encoders[0],
@@ -4595,57 +4598,54 @@ def read_config_from_file(args: argparse.Namespace, parser: argparse.ArgumentPar
 # region utils
 
 
-def resume_from_local_or_hf_if_specified(accelerator, args):
+def resume_from_local_or_hf_if_specified(device, args):
     if not args.resume:
         return
 
     if not args.resume_from_huggingface:
         logger.info(f"resume training from local state: {args.resume}")
-        accelerator.load_state(args.resume)
+        state_dict = torch.load(args.resume, map_location="cpu")
+        xm.send(state_dict, 0)
         return
 
-    logger.info(f"resume training from huggingface state: {args.resume}")
-    repo_id = args.resume.split("/")[0] + "/" + args.resume.split("/")[1]
-    path_in_repo = "/".join(args.resume.split("/")[2:])
-    revision = None
-    repo_type = None
-    if ":" in path_in_repo:
-        divided = path_in_repo.split(":")
-        if len(divided) == 2:
-            path_in_repo, revision = divided
-            repo_type = "model"
-        else:
-            path_in_repo, revision, repo_type = divided
-    logger.info(f"Downloading state from huggingface: {repo_id}/{path_in_repo}@{revision}")
+    if xm.is_master_ordinal():
+        logger.info(f"Downloading state from huggingface: {repo_id}/{path_in_repo}@{revision}")
 
-    list_files = huggingface_util.list_dir(
-        repo_id=repo_id,
-        subfolder=path_in_repo,
-        revision=revision,
-        token=args.huggingface_token,
-        repo_type=repo_type,
-    )
-
-    async def download(filename) -> str:
-        def task():
-            return hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                revision=revision,
-                repo_type=repo_type,
-                token=args.huggingface_token,
-            )
-
-        return await asyncio.get_event_loop().run_in_executor(None, task)
-
-    loop = asyncio.get_event_loop()
-    results = loop.run_until_complete(asyncio.gather(*[download(filename=filename.rfilename) for filename in list_files]))
-    if len(results) == 0:
-        raise ValueError(
-            "No files found in the specified repo id/path/revision / 指定されたリポジトリID/パス/リビジョンにファイルが見つかりませんでした"
+        list_files = huggingface_util.list_dir(
+            repo_id=repo_id,
+            subfolder=path_in_repo,
+            revision=revision,
+            token=args.huggingface_token,
+            repo_type=repo_type,
         )
-    dirname = os.path.dirname(results[0])
-    accelerator.load_state(dirname)
+
+        async def download(filename) -> str:
+            def task():
+                return hf_hub_download(
+                    repo_id=repo_id,
+                    filename=filename,
+                    revision=revision,
+                    repo_type=repo_type,
+                    token=args.huggingface_token,
+                )
+
+            return await asyncio.get_event_loop().run_in_executor(None, task)
+
+        loop = asyncio.get_event_loop()
+        results = loop.run_until_complete(asyncio.gather(*[download(filename=filename.rfilename) for filename in list_files]))
+        if len(results) == 0:
+            raise ValueError(
+                "No files found in the specified repo id/path/revision / 指定されたリポジトリID/パス/リビジョンにファイルが見つかりませんでした"
+            )
+        dirname = os.path.dirname(results[0])
+        state_dict = torch.load(os.path.join(dirname, "pytorch_model.bin"), map_location="cpu")  # Example file name
+        # Send state_dict to other processes
+        for i in range(1, xm.xrt_world_size()):
+            xm.send(state_dict, i)
+    else:
+        # Receive state_dict from the master process
+        state_dict = xm.rendezvous("load_hf_state_dict")
+    xm.mark_step()
 
 
 def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
@@ -5044,6 +5044,9 @@ def get_optimizer(args, trainable_params) -> tuple[str, str, object]:
         # make optimizer as train mode before training for schedulefree optimizer. the optimizer will be in eval mode in sampling and saving.
         optimizer.train()
 
+    # Wrap the optimizer with DistributedOptimizer
+    optimizer = DistributedOptimizer(optimizer)
+
     return optimizer_name, optimizer_args, optimizer
 
 
@@ -5252,78 +5255,7 @@ def prepare_dataset_args(args: argparse.Namespace, support_metadata: bool):
 
 
 def prepare_accelerator(args: argparse.Namespace):
-    """
-    this function also prepares deepspeed plugin
-    """
-
-    if args.logging_dir is None:
-        logging_dir = None
-    else:
-        log_prefix = "" if args.log_prefix is None else args.log_prefix
-        logging_dir = args.logging_dir + "/" + log_prefix + time.strftime("%Y%m%d%H%M%S", time.localtime())
-
-    if args.log_with is None:
-        if logging_dir is not None:
-            log_with = "tensorboard"
-        else:
-            log_with = None
-    else:
-        log_with = args.log_with
-        if log_with in ["tensorboard", "all"]:
-            if logging_dir is None:
-                raise ValueError(
-                    "logging_dir is required when log_with is tensorboard / Tensorboardを使う場合、logging_dirを指定してください"
-                )
-        if log_with in ["wandb", "all"]:
-            try:
-                import wandb
-            except ImportError:
-                raise ImportError("No wandb / wandb がインストールされていないようです")
-            if logging_dir is not None:
-                os.makedirs(logging_dir, exist_ok=True)
-                os.environ["WANDB_DIR"] = logging_dir
-            if args.wandb_api_key is not None:
-                wandb.login(key=args.wandb_api_key)
-
-    # torch.compile のオプション。 NO の場合は torch.compile は使わない
-    dynamo_backend = "NO"
-    if args.torch_compile:
-        dynamo_backend = args.dynamo_backend
-
-    kwargs_handlers = [
-        (
-            InitProcessGroupKwargs(
-                backend="gloo" if os.name == "nt" or not torch.cuda.is_available() else "nccl",
-                init_method=(
-                    "env://?use_libuv=False" if os.name == "nt" and Version(torch.__version__) >= Version("2.4.0") else None
-                ),
-                timeout=datetime.timedelta(minutes=args.ddp_timeout) if args.ddp_timeout else None,
-            )
-            if torch.cuda.device_count() > 1
-            else None
-        ),
-        (
-            DistributedDataParallelKwargs(
-                gradient_as_bucket_view=args.ddp_gradient_as_bucket_view, static_graph=args.ddp_static_graph
-            )
-            if args.ddp_gradient_as_bucket_view or args.ddp_static_graph
-            else None
-        ),
-    ]
-    kwargs_handlers = [i for i in kwargs_handlers if i is not None]
-    deepspeed_plugin = deepspeed_utils.prepare_deepspeed_plugin(args)
-
-    accelerator = Accelerator(
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        mixed_precision=args.mixed_precision,
-        log_with=log_with,
-        project_dir=logging_dir,
-        kwargs_handlers=kwargs_handlers,
-        dynamo_backend=dynamo_backend,
-        deepspeed_plugin=deepspeed_plugin,
-    )
-    print("accelerator device:", accelerator.device)
-    return accelerator
+    pass
 
 
 def prepare_dtype(args: argparse.Namespace):
@@ -5390,35 +5322,36 @@ def _load_target_model(args: argparse.Namespace, weight_dtype, device="cpu", une
     return text_encoder, vae, unet, load_stable_diffusion_format
 
 
-def load_target_model(args, weight_dtype, accelerator, unet_use_linear_projection_in_v2=False):
-    for pi in range(accelerator.state.num_processes):
-        if pi == accelerator.state.local_process_index:
-            logger.info(f"loading model for process {accelerator.state.local_process_index}/{accelerator.state.num_processes}")
+def load_target_model(args, weight_dtype, device, unet_use_linear_projection_in_v2=False):
+    for pi in range(xm.xrt_world_size()):
+        if pi == xm.get_ordinal():
+            if xm.get_ordinal() == 0:
+                logger.info(f"loading model for process {xm.get_ordinal()}/{xm.xrt_world_size()}")
 
             text_encoder, vae, unet, load_stable_diffusion_format = _load_target_model(
                 args,
                 weight_dtype,
-                accelerator.device if args.lowram else "cpu",
+                device if args.lowram else "cpu",
                 unet_use_linear_projection_in_v2=unet_use_linear_projection_in_v2,
             )
             # work on low-ram device
             if args.lowram:
-                text_encoder.to(accelerator.device)
-                unet.to(accelerator.device)
-                vae.to(accelerator.device)
+                text_encoder.to(device)
+                unet.to(device)
+                vae.to(device)
 
-            clean_memory_on_device(accelerator.device)
-        accelerator.wait_for_everyone()
+            clean_memory_on_device(device)
+        xm.mark_step()  # Synchronize loading across processes
     return text_encoder, vae, unet, load_stable_diffusion_format
 
 
-def patch_accelerator_for_fp16_training(accelerator):
-    org_unscale_grads = accelerator.scaler._unscale_grads_
+def patch_accelerator_for_fp16_training(device):
+    org_unscale_grads = device.scaler._unscale_grads_
 
     def _unscale_grads_replacer(optimizer, inv_scale, found_inf, allow_fp16):
         return org_unscale_grads(optimizer, inv_scale, found_inf, True)
 
-    accelerator.scaler._unscale_grads_ = _unscale_grads_replacer
+    device.scaler._unscale_grads_ = _unscale_grads_replacer
 
 
 def get_hidden_states(args: argparse.Namespace, input_ids, tokenizer, text_encoder, weight_dtype=None):
@@ -5538,7 +5471,7 @@ def get_hidden_states_sdxl(
     hidden_states2 = enc_out["hidden_states"][-2]  # penuultimate layer
 
     # pool2 = enc_out["text_embeds"]
-    unwrapped_text_encoder2 = text_encoder2 if accelerator is None else accelerator.unwrap_model(text_encoder2)
+    unwrapped_text_encoder2 = text_encoder2.module if isinstance(text_encoder2, xm.MpModelWrapper) else text_encoder2
     pool2 = pool_workaround(unwrapped_text_encoder2, enc_out["last_hidden_state"], input_ids2, tokenizer2.eos_token_id)
 
     # b*n, 77, 768 or 1280 -> b, n*77, 768 or 1280
@@ -5627,7 +5560,7 @@ def get_remove_step_no(args: argparse.Namespace, step_no: int):
 def save_sd_model_on_epoch_end_or_stepwise(
     args: argparse.Namespace,
     on_epoch_end: bool,
-    accelerator,
+    device,
     src_path: str,
     save_stable_diffusion_format: bool,
     use_safetensors: bool,
@@ -5653,7 +5586,6 @@ def save_sd_model_on_epoch_end_or_stepwise(
     save_sd_model_on_epoch_end_or_stepwise_common(
         args,
         on_epoch_end,
-        accelerator,
         save_stable_diffusion_format,
         use_safetensors,
         epoch,
@@ -5667,7 +5599,7 @@ def save_sd_model_on_epoch_end_or_stepwise(
 def save_sd_model_on_epoch_end_or_stepwise_common(
     args: argparse.Namespace,
     on_epoch_end: bool,
-    accelerator,
+    device,
     save_stable_diffusion_format: bool,
     use_safetensors: bool,
     epoch: int,
@@ -5746,12 +5678,12 @@ def save_sd_model_on_epoch_end_or_stepwise_common(
 
     if args.save_state:
         if on_epoch_end:
-            save_and_remove_state_on_epoch_end(args, accelerator, epoch_no)
+            save_and_remove_state_on_epoch_end(args, device, epoch_no)
         else:
-            save_and_remove_state_stepwise(args, accelerator, global_step)
+            save_and_remove_state_stepwise(args, device, global_step)
 
 
-def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, epoch_no):
+def save_and_remove_state_on_epoch_end(args: argparse.Namespace, device, epoch_no):
     model_name = default_if_none(args.output_name, DEFAULT_EPOCH_NAME)
 
     logger.info("")
@@ -5759,7 +5691,7 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
     os.makedirs(args.output_dir, exist_ok=True)
 
     state_dir = os.path.join(args.output_dir, EPOCH_STATE_NAME.format(model_name, epoch_no))
-    accelerator.save_state(state_dir)
+    xm.save(device.get_state_dict(), state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
         huggingface_util.upload(args, state_dir, "/" + EPOCH_STATE_NAME.format(model_name, epoch_no))
@@ -5773,7 +5705,7 @@ def save_and_remove_state_on_epoch_end(args: argparse.Namespace, accelerator, ep
             shutil.rmtree(state_dir_old)
 
 
-def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_no):
+def save_and_remove_state_stepwise(args: argparse.Namespace, device, step_no):
     model_name = default_if_none(args.output_name, DEFAULT_STEP_NAME)
 
     logger.info("")
@@ -5781,7 +5713,7 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
     os.makedirs(args.output_dir, exist_ok=True)
 
     state_dir = os.path.join(args.output_dir, STEP_STATE_NAME.format(model_name, step_no))
-    accelerator.save_state(state_dir)
+    xm.save(device.get_state_dict(), state_dir)
     if args.save_state_to_huggingface:
         logger.info("uploading state to huggingface.")
         huggingface_util.upload(args, state_dir, "/" + STEP_STATE_NAME.format(model_name, step_no))
@@ -5799,7 +5731,7 @@ def save_and_remove_state_stepwise(args: argparse.Namespace, accelerator, step_n
                 shutil.rmtree(state_dir_old)
 
 
-def save_state_on_train_end(args: argparse.Namespace, accelerator):
+def save_state_on_train_end(args: argparse.Namespace, device):
     model_name = default_if_none(args.output_name, DEFAULT_LAST_OUTPUT_NAME)
 
     logger.info("")
@@ -5807,7 +5739,7 @@ def save_state_on_train_end(args: argparse.Namespace, accelerator):
     os.makedirs(args.output_dir, exist_ok=True)
 
     state_dir = os.path.join(args.output_dir, LAST_STATE_NAME.format(model_name))
-    accelerator.save_state(state_dir)
+    device.save_state(state_dir)
 
     if args.save_state_to_huggingface:
         logger.info("uploading last state to huggingface.")
@@ -6135,235 +6067,6 @@ def load_prompts(prompt_file: str) -> List[Dict]:
         prompt_dict.pop("subset", None)
 
     return prompts
-
-
-def sample_images_common(
-    pipe_class,
-    accelerator: Accelerator,
-    args: argparse.Namespace,
-    epoch: int,
-    steps: int,
-    device,
-    vae,
-    tokenizer,
-    text_encoder,
-    unet,
-    prompt_replacement=None,
-    controlnet=None,
-):
-    """
-    StableDiffusionLongPromptWeightingPipelineの改造版を使うようにしたので、clip skipおよびプロンプトの重みづけに対応した
-    TODO Use strategies here
-    """
-
-    if steps == 0:
-        if not args.sample_at_first:
-            return
-    else:
-        if args.sample_every_n_steps is None and args.sample_every_n_epochs is None:
-            return
-        if args.sample_every_n_epochs is not None:
-            # sample_every_n_steps は無視する
-            if epoch is None or epoch % args.sample_every_n_epochs != 0:
-                return
-        else:
-            if steps % args.sample_every_n_steps != 0 or epoch is not None:  # steps is not divisible or end of epoch
-                return
-
-    logger.info("")
-    logger.info(f"generating sample images at step / サンプル画像生成 ステップ: {steps}")
-    if not os.path.isfile(args.sample_prompts):
-        logger.error(f"No prompt file / プロンプトファイルがありません: {args.sample_prompts}")
-        return
-
-    distributed_state = PartialState()  # for multi gpu distributed inference. this is a singleton, so it's safe to use it here
-
-    org_vae_device = vae.device  # CPUにいるはず
-    vae.to(distributed_state.device)  # distributed_state.device is same as accelerator.device
-
-    # unwrap unet and text_encoder(s)
-    unet = accelerator.unwrap_model(unet)
-    if isinstance(text_encoder, (list, tuple)):
-        text_encoder = [accelerator.unwrap_model(te) for te in text_encoder]
-    else:
-        text_encoder = accelerator.unwrap_model(text_encoder)
-
-    # read prompts
-    if args.sample_prompts.endswith(".txt"):
-        with open(args.sample_prompts, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        prompts = [line.strip() for line in lines if len(line.strip()) > 0 and line[0] != "#"]
-    elif args.sample_prompts.endswith(".toml"):
-        with open(args.sample_prompts, "r", encoding="utf-8") as f:
-            data = toml.load(f)
-        prompts = [dict(**data["prompt"], **subset) for subset in data["prompt"]["subset"]]
-    elif args.sample_prompts.endswith(".json"):
-        with open(args.sample_prompts, "r", encoding="utf-8") as f:
-            prompts = json.load(f)
-
-    default_scheduler = get_my_scheduler(sample_sampler=args.sample_sampler, v_parameterization=args.v_parameterization)
-
-    pipeline = pipe_class(
-        text_encoder=text_encoder,
-        vae=vae,
-        unet=unet,
-        tokenizer=tokenizer,
-        scheduler=default_scheduler,
-        safety_checker=None,
-        feature_extractor=None,
-        requires_safety_checker=False,
-        clip_skip=args.clip_skip,
-    )
-    pipeline.to(distributed_state.device)
-    save_dir = args.output_dir + "/sample"
-    os.makedirs(save_dir, exist_ok=True)
-
-    # preprocess prompts
-    for i in range(len(prompts)):
-        prompt_dict = prompts[i]
-        if isinstance(prompt_dict, str):
-            prompt_dict = line_to_prompt_dict(prompt_dict)
-            prompts[i] = prompt_dict
-        assert isinstance(prompt_dict, dict)
-
-        # Adds an enumerator to the dict based on prompt position. Used later to name image files. Also cleanup of extra data in original prompt dict.
-        prompt_dict["enum"] = i
-        prompt_dict.pop("subset", None)
-
-    # save random state to restore later
-    rng_state = torch.get_rng_state()
-    cuda_rng_state = None
-    try:
-        cuda_rng_state = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
-    except Exception:
-        pass
-
-    if distributed_state.num_processes <= 1:
-        # If only one device is available, just use the original prompt list. We don't need to care about the distribution of prompts.
-        with torch.no_grad():
-            for prompt_dict in prompts:
-                sample_image_inference(
-                    accelerator, args, pipeline, save_dir, prompt_dict, epoch, steps, prompt_replacement, controlnet=controlnet
-                )
-    else:
-        # Creating list with N elements, where each element is a list of prompt_dicts, and N is the number of processes available (number of devices available)
-        # prompt_dicts are assigned to lists based on order of processes, to attempt to time the image creation time to match enum order. Probably only works when steps and sampler are identical.
-        per_process_prompts = []  # list of lists
-        for i in range(distributed_state.num_processes):
-            per_process_prompts.append(prompts[i :: distributed_state.num_processes])
-
-        with torch.no_grad():
-            with distributed_state.split_between_processes(per_process_prompts) as prompt_dict_lists:
-                for prompt_dict in prompt_dict_lists[0]:
-                    sample_image_inference(
-                        accelerator, args, pipeline, save_dir, prompt_dict, epoch, steps, prompt_replacement, controlnet=controlnet
-                    )
-
-    # clear pipeline and cache to reduce vram usage
-    del pipeline
-
-    torch.set_rng_state(rng_state)
-    if torch.cuda.is_available() and cuda_rng_state is not None:
-        torch.cuda.set_rng_state(cuda_rng_state)
-    vae.to(org_vae_device)
-
-    clean_memory_on_device(accelerator.device)
-
-
-def sample_image_inference(
-    accelerator: Accelerator,
-    args: argparse.Namespace,
-    pipeline: Union[StableDiffusionLongPromptWeightingPipeline, SdxlStableDiffusionLongPromptWeightingPipeline],
-    save_dir,
-    prompt_dict,
-    epoch,
-    steps,
-    prompt_replacement,
-    controlnet=None,
-):
-    assert isinstance(prompt_dict, dict)
-    negative_prompt = prompt_dict.get("negative_prompt")
-    sample_steps = prompt_dict.get("sample_steps", 30)
-    width = prompt_dict.get("width", 512)
-    height = prompt_dict.get("height", 512)
-    scale = prompt_dict.get("scale", 7.5)
-    seed = prompt_dict.get("seed")
-    controlnet_image = prompt_dict.get("controlnet_image")
-    prompt: str = prompt_dict.get("prompt", "")
-    sampler_name: str = prompt_dict.get("sample_sampler", args.sample_sampler)
-
-    if prompt_replacement is not None:
-        prompt = prompt.replace(prompt_replacement[0], prompt_replacement[1])
-        if negative_prompt is not None:
-            negative_prompt = negative_prompt.replace(prompt_replacement[0], prompt_replacement[1])
-
-    if seed is not None:
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)
-    else:
-        # True random sample image generation
-        torch.seed()
-        if torch.cuda.is_available():
-            torch.cuda.seed()
-
-    scheduler = get_my_scheduler(
-        sample_sampler=sampler_name,
-        v_parameterization=args.v_parameterization,
-    )
-    pipeline.scheduler = scheduler
-
-    if controlnet_image is not None:
-        controlnet_image = Image.open(controlnet_image).convert("RGB")
-        controlnet_image = controlnet_image.resize((width, height), Image.LANCZOS)
-
-    height = max(64, height - height % 8)  # round to divisible by 8
-    width = max(64, width - width % 8)  # round to divisible by 8
-    logger.info(f"prompt: {prompt}")
-    logger.info(f"negative_prompt: {negative_prompt}")
-    logger.info(f"height: {height}")
-    logger.info(f"width: {width}")
-    logger.info(f"sample_steps: {sample_steps}")
-    logger.info(f"scale: {scale}")
-    logger.info(f"sample_sampler: {sampler_name}")
-    if seed is not None:
-        logger.info(f"seed: {seed}")
-    with accelerator.autocast():
-        latents = pipeline(
-            prompt=prompt,
-            height=height,
-            width=width,
-            num_inference_steps=sample_steps,
-            guidance_scale=scale,
-            negative_prompt=negative_prompt,
-            controlnet=controlnet,
-            controlnet_image=controlnet_image,
-        )
-
-    if torch.cuda.is_available():
-        with torch.cuda.device(torch.cuda.current_device()):
-            torch.cuda.empty_cache()
-
-    image = pipeline.latents_to_image(latents)[0]
-
-    # adding accelerator.wait_for_everyone() here should sync up and ensure that sample images are saved in the same order as the original prompt list
-    # but adding 'enum' to the filename should be enough
-
-    ts_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
-    num_suffix = f"e{epoch:06d}" if epoch is not None else f"{steps:06d}"
-    seed_suffix = "" if seed is None else f"_{seed}"
-    i: int = prompt_dict["enum"]
-    img_filename = f"{'' if args.output_name is None else args.output_name + '_'}{num_suffix}_{i:02d}_{ts_str}{seed_suffix}.png"
-    image.save(os.path.join(save_dir, img_filename))
-
-    # send images to wandb if enabled
-    if "wandb" in [tracker.name for tracker in accelerator.trackers]:
-        wandb_tracker = accelerator.get_tracker("wandb")
-
-        import wandb
-
-        # not to commit images to avoid inconsistency between training and logging steps
-        wandb_tracker.log({f"sample_{i}": wandb.Image(image, caption=prompt)}, commit=False)  # positive prompt as a caption
 
 
 # endregion
