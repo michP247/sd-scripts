@@ -179,10 +179,6 @@ def train(args):
     device = xm.xla_device()
     print(f"training on device: {device}")
 
-    # Print TPU info after initializing the device
-    print("TPU Info After Device Initialization:")
-    print_tpu_info()
-
     # Prepare a type corresponding to mixed precision and cast it accordingly.
     weight_dtype, save_dtype = train_util.prepare_dtype(args)
 
