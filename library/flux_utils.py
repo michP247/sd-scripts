@@ -107,29 +107,44 @@ def load_flow_model(
         print(f"Setting the number of single blocks from {params.depth_single_blocks} to {num_single_blocks}")
         params = replace(params, depth_single_blocks=num_single_blocks)
 
-    # Directly construct the model on the CPU to avoid device-specific issues
+    # Construct the model on the CPU
     model = flux_models.Flux(params)
     if dtype is not None:
         model = model.to(dtype)
 
     # Load state_dict
     print(f"Loading state dict from {ckpt_path}")
-    sd = {}
-    for ckpt_path in ckpt_paths:
-        sd.update(load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype))
+
+    # Use torch.load to load the state dict on each process
+    if xm.get_ordinal() == 0:
+        merged_sd = {}
+        for ckpt_path in ckpt_paths:
+            sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype)
+            merged_sd.update(sd)
+        # Save merged state_dict to a temporary file
+        torch.save(merged_sd, "merged_state_dict.pth")
+
+    # Synchronize all processes
+    xm.rendezvous("load_checkpoint")
+
+    # Load the merged state dict on all processes
+    merged_sd = torch.load("merged_state_dict.pth", map_location="cpu")
 
     if is_diffusers:
         print("Converting Diffusers to BFL")
-        sd = convert_diffusers_sd_to_bfl(sd, num_double_blocks, num_single_blocks)
+        merged_sd = convert_diffusers_sd_to_bfl(merged_sd, num_double_blocks, num_single_blocks)
         print("Converted Diffusers to BFL")
 
-    for key in list(sd.keys()):
+    for key in list(merged_sd.keys()):
         new_key = key.replace("model.diffusion_model.", "")
         if new_key == key:
             break
-        sd[new_key] = sd.pop(key)
+        merged_sd[new_key] = merged_sd.pop(key)
 
-    info = model.load_state_dict(sd, strict=False)
+    # Wrap with MpModelWrapper before loading state_dict
+    model = xm.MpModelWrapper(model)
+
+    info = model.load_state_dict(merged_sd, strict=False)
     print(f"Loaded Flux: {info}")
 
     # Move the model to the target device after loading the state dict
@@ -143,11 +158,23 @@ def load_ae(
     ckpt_path: str, dtype: torch.dtype, device: Union[str, torch.device], disable_mmap: bool = False
 ) -> flux_models.AutoEncoder:
     print("Building AutoEncoder")
-    # Directly construct the model on the CPU
+    # Construct the model on the CPU
     ae = flux_models.AutoEncoder(flux_models.configs[MODEL_NAME_DEV].ae_params).to(dtype)
 
     print(f"Loading state dict from {ckpt_path}")
-    sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype)
+
+    # Load state_dict on the master process
+    if xm.get_ordinal() == 0:
+        sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype)
+        # Save state_dict to a temporary file
+        torch.save(sd, "ae_state_dict.pth")
+
+    # Synchronize all processes
+    xm.rendezvous("load_ae_checkpoint")
+
+    # Load the state dict on all processes
+    sd = torch.load("ae_state_dict.pth", map_location="cpu")
+
     info = ae.load_state_dict(sd, strict=False)
     print(f"Loaded AE: {info}")
 
@@ -166,17 +193,29 @@ def load_controlnet(
 ):
     print("Building ControlNet")
     name = MODEL_NAME_DEV if not is_schnell else MODEL_NAME_SCHNELL
-    # Directly construct the model on the CPU
+    # Construct the model on the CPU
     controlnet = flux_models.ControlNetFlux(flux_models.configs[name].params).to(dtype)
 
     if ckpt_path is not None:
         print(f"Loading state dict from {ckpt_path}")
-        sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype)
+
+        # Load state_dict on the master process
+        if xm.get_ordinal() == 0:
+            sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype)
+            # Save state_dict to a temporary file
+            torch.save(sd, "controlnet_state_dict.pth")
+
+        # Synchronize all processes
+        xm.rendezvous("load_controlnet_checkpoint")
+
+        # Load the state dict on all processes
+        sd = torch.load("controlnet_state_dict.pth", map_location="cpu")
+
         info = controlnet.load_state_dict(sd, strict=False)
         print(f"Loaded ControlNet: {info}")
 
     # Move the model to the target device after loading the state dict
-    #controlnet.to(device)
+    controlnet.to(device)
     print_num_params(controlnet, "ControlNet")
 
     return controlnet
@@ -285,7 +324,21 @@ def load_clip_l(
         sd = state_dict
     else:
         print(f"Loading state dict from {ckpt_path}")
-        sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype)
+
+        # Load state_dict on the master process
+        if xm.get_ordinal() == 0:
+            sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype)
+            # Save state_dict to a temporary file
+            torch.save(sd, "clip_l_state_dict.pth")
+
+        # Synchronize all processes
+        xm.rendezvous("load_clip_l_checkpoint")
+
+        # Load the state dict on all processes
+        sd = torch.load("clip_l_state_dict.pth", map_location="cpu")
+
+    # Wrap with MpModelWrapper before loading state_dict
+    clip = xm.MpModelWrapper(clip)
 
     info = clip.load_state_dict(sd, strict=False)
     print(f"Loaded CLIP-L: {info}")
@@ -345,7 +398,21 @@ def load_t5xxl(
         sd = state_dict
     else:
         print(f"Loading state dict from {ckpt_path}")
-        sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype)
+
+        # Load state_dict on the master process
+        if xm.get_ordinal() == 0:
+            sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype)
+            # Save state_dict to a temporary file
+            torch.save(sd, "t5xxl_state_dict.pth")
+
+        # Synchronize all processes
+        xm.rendezvous("load_t5xxl_checkpoint")
+
+        # Load the state dict on all processes
+        sd = torch.load("t5xxl_state_dict.pth", map_location="cpu")
+
+    # Wrap with MpModelWrapper before loading state_dict
+    t5xxl = xm.MpModelWrapper(t5xxl)
 
     info = t5xxl.load_state_dict(sd, strict=False)
     print(f"Loaded T5xxl: {info}")

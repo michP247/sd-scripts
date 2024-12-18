@@ -25,6 +25,7 @@ from typing import (
 )
 from accelerate import Accelerator, InitProcessGroupKwargs, DistributedDataParallelKwargs, PartialState
 import torch_xla.core.xla_model as xm
+import torch_xla.runtime as xr
 import torch_xla.distributed.parallel_loader as pl
 from torch.distributed.optim import DistributedOptimizer
 import glob
@@ -1094,9 +1095,9 @@ class BaseDataset(torch.utils.data.Dataset):
         max_workers = min(max_workers, caching_strategy.batch_size)  # max_workers should be less than batch_size
         executor = ThreadPoolExecutor(max_workers)
 
-        # Use xm.xrt_world_size() and xm.get_ordinal() for distributed settings
-        num_processes = xm.xrt_world_size()
-        process_index = xm.get_ordinal()
+        # for distributed settings
+        num_processes = xr.world_size()
+        process_index = xm.global_ordinal()
 
         # Create a tqdm instance for each process, but only enable it on the master ordinal
         master_progress_bar = tqdm(total=len(image_infos), desc="Caching latents", disable=process_index != 0)
@@ -1250,8 +1251,8 @@ class BaseDataset(torch.utils.data.Dataset):
         batch = []
 
         # Use xm.xrt_world_size() and xm.get_ordinal() for distributed settings
-        num_processes = xm.xrt_world_size()
-        process_index = xm.get_ordinal()
+        num_processes = xr.world_size()
+        process_index = xr.global_ordinal()
 
         logger.info("checking cache validity...")
         for i, info in enumerate(tqdm(image_infos, disable=process_index != 0)):
@@ -4640,7 +4641,7 @@ def resume_from_local_or_hf_if_specified(device, args):
         dirname = os.path.dirname(results[0])
         state_dict = torch.load(os.path.join(dirname, "pytorch_model.bin"), map_location="cpu")  # Example file name
         # Send state_dict to other processes
-        for i in range(1, xm.xrt_world_size()):
+        for i in range(1, xr.world_size()):
             xm.send(state_dict, i)
     else:
         # Receive state_dict from the master process
@@ -5323,10 +5324,10 @@ def _load_target_model(args: argparse.Namespace, weight_dtype, device="cpu", une
 
 
 def load_target_model(args, weight_dtype, device, unet_use_linear_projection_in_v2=False):
-    for pi in range(xm.xrt_world_size()):
-        if pi == xm.get_ordinal():
-            if xm.get_ordinal() == 0:
-                logger.info(f"loading model for process {xm.get_ordinal()}/{xm.xrt_world_size()}")
+    for pi in range(xr.world_size()):
+        if pi == xr.global_ordinal():
+            if xr.global_ordinal() == 0:
+                logger.info(f"loading model for process {xr.global_ordinal()}/{xr.world_size()}")
 
             text_encoder, vae, unet, load_stable_diffusion_format = _load_target_model(
                 args,

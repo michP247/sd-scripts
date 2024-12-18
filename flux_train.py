@@ -225,6 +225,7 @@ def train(args):
     sample_prompts_te_outputs = None
     if args.cache_text_encoder_outputs:
         # Text Encodes are eval and no grad here
+        # Wrap the models with MpModelWrapper before moving to device
         clip_l.to(device)
         t5xxl.to(device)
 
@@ -444,7 +445,7 @@ def train(args):
     if args.deepspeed:
         raise ValueError("Deepspeed is not supported for XLA, use native XLA implementation instead.")
     else:
-        flux = xm.MpModelWrapper(flux).to(device)
+        #flux = xm.MpModelWrapper(flux).to(device)
         if is_swapping_blocks:
             flux.move_to_device_except_swap_blocks(device)  # reduce peak memory usage
             
@@ -526,7 +527,7 @@ def train(args):
     logger.info(f"  gradient accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  total optimization steps: {args.max_train_steps}")
 
-    progress_bar = tqdm(range(args.max_train_steps), smoothing=0, disable=xm.get_ordinal() != 0, desc="steps")
+    progress_bar = tqdm(range(args.max_train_steps), smoothing=0, disable=xr.global_ordinal() != 0, desc="steps")
     global_step = 0
 
     noise_scheduler = FlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=args.discrete_flow_shift)
@@ -663,7 +664,7 @@ def train(args):
                     progress_bar.update(1)
                     global_step += 1
 
-                    if xm.get_ordinal() == 0:
+                    if xr.global_ordinal() == 0:
                         optimizer_eval_fn()
 
                         # Save model at each specified step
@@ -682,7 +683,7 @@ def train(args):
                         optimizer_train_fn()
 
                     current_loss = loss.detach().item() * args.gradient_accumulation_steps
-                    if xm.get_ordinal() == 0:
+                    if xr.global_ordinal() == 0:
                         logs = {"loss": current_loss}
                         train_util.append_lr_to_logs(logs, lr_scheduler, args.optimizer_type, including_unet=True)                       
 
@@ -699,7 +700,7 @@ def train(args):
                     for i in range(1, len(optimizers)):
                         lr_schedulers[i].step()
 
-        if xm.get_ordinal() == 0:
+        if xr.global_ordinal() == 0:
             logs = {"loss/epoch": loss_recorder.moving_average}
 
         xm.rendezvous("end-of-epoch")
@@ -707,7 +708,7 @@ def train(args):
         # Save model at each specified step
         optimizer_eval_fn()
         if args.save_every_n_epochs is not None:
-            if xm.get_ordinal() == 0:
+            if xr.global_ordinal() == 0:
                 flux_train_utils.save_flux_model_on_epoch_end_or_stepwise(
                     args,
                     True,
@@ -724,7 +725,7 @@ def train(args):
         )
         optimizer_train_fn()
 
-    if xm.get_ordinal() == 0:
+    if xr.global_ordinal() == 0:
         optimizer_eval_fn()  # Evaluate the optimizer state if needed
 
         flux_train_utils.save_flux_model_on_train_end(args, save_dtype, epoch, global_step, flux)
