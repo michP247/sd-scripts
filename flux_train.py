@@ -140,7 +140,7 @@ def train(args):
     ds_for_collator = train_dataset_group if args.max_data_loader_n_workers == 0 else None
     collator = train_util.collator_class(current_epoch, current_step, ds_for_collator)
 
-    train_dataset_group.verify_bucket_reso_steps(16)  # TODO これでいいか確認
+    train_dataset_group.verify_bucket_reso_steps(16)
 
     _, is_schnell, _, _ = flux_utils.analyze_checkpoint_state(args.pretrained_model_name_or_path)
     if args.debug_dataset:
@@ -318,7 +318,7 @@ def train(args):
 
     logger.info(f"number of trainable parameters: {n_params}")
 
-    # 学習に必要なクラスを準備する
+    # Prepare classes for learning
     logger.info("prepare optimizer, data loader etc.")
 
     if args.blockwise_fused_optimizers:
@@ -363,7 +363,6 @@ def train(args):
         # prepare optimizers for each group
         optimizers = []
         for group in grouped_params:
-            # Use torch.optim.AdamW 
             _, _, optimizer = train_util.get_optimizer(args, trainable_params=[group])
             optimizers.append(optimizer)
         optimizer = optimizers[0]  # avoid error in the following code
@@ -445,11 +444,9 @@ def train(args):
     if args.deepspeed:
         raise ValueError("Deepspeed is not supported for XLA, use native XLA implementation instead.")
     else:
-        #flux = xm.MpModelWrapper(flux).to(device)
         if is_swapping_blocks:
             flux.move_to_device_except_swap_blocks(device)  # reduce peak memory usage
             
-
     if args.fused_backward_pass:
         import library.adafactor_fused
 
@@ -527,7 +524,7 @@ def train(args):
     logger.info(f"  gradient accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  total optimization steps: {args.max_train_steps}")
 
-    progress_bar = tqdm(range(args.max_train_steps), smoothing=0, disable=xr.global_ordinal() != 0, desc="steps")
+    progress_bar = tqdm(range(args.max_train_steps), smoothing=0, disable=runtime.global_ordinal() != 0, desc="steps")
     global_step = 0
 
     noise_scheduler = FlowMatchEulerDiscreteScheduler(num_train_timesteps=1000, shift=args.discrete_flow_shift)
@@ -664,7 +661,7 @@ def train(args):
                     progress_bar.update(1)
                     global_step += 1
 
-                    if xr.global_ordinal() == 0:
+                    if runtime.global_ordinal() == 0:
                         optimizer_eval_fn()
 
                         # Save model at each specified step
@@ -683,7 +680,7 @@ def train(args):
                         optimizer_train_fn()
 
                     current_loss = loss.detach().item() * args.gradient_accumulation_steps
-                    if xr.global_ordinal() == 0:
+                    if runtime.global_ordinal() == 0:
                         logs = {"loss": current_loss}
                         train_util.append_lr_to_logs(logs, lr_scheduler, args.optimizer_type, including_unet=True)                       
 
@@ -700,7 +697,7 @@ def train(args):
                     for i in range(1, len(optimizers)):
                         lr_schedulers[i].step()
 
-        if xr.global_ordinal() == 0:
+        if runtime.global_ordinal() == 0:
             logs = {"loss/epoch": loss_recorder.moving_average}
 
         xm.rendezvous("end-of-epoch")
@@ -708,7 +705,7 @@ def train(args):
         # Save model at each specified step
         optimizer_eval_fn()
         if args.save_every_n_epochs is not None:
-            if xr.global_ordinal() == 0:
+            if runtime.global_ordinal() == 0:
                 flux_train_utils.save_flux_model_on_epoch_end_or_stepwise(
                     args,
                     True,
@@ -720,12 +717,9 @@ def train(args):
                     flux,
                 )
 
-        flux_train_utils.sample_images(
-            device, args, epoch + 1, global_step, flux, ae, [clip_l, t5xxl], sample_prompts_te_outputs
-        )
         optimizer_train_fn()
 
-    if xr.global_ordinal() == 0:
+    if runtime.global_ordinal() == 0:
         optimizer_eval_fn()  # Evaluate the optimizer state if needed
 
         flux_train_utils.save_flux_model_on_train_end(args, save_dtype, epoch, global_step, flux)

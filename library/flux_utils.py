@@ -146,12 +146,7 @@ def load_flow_model(
 
     info = model.load_state_dict(merged_sd, strict=False)
     print(f"Loaded Flux: {info}")
-
-    # Move the model to the target device after loading the state dict
-    #model.to(device)
-
     print_num_params(model, "Flux")
-
     return is_schnell, model
 
 def load_ae(
@@ -177,11 +172,7 @@ def load_ae(
 
     info = ae.load_state_dict(sd, strict=False)
     print(f"Loaded AE: {info}")
-
-    # Move the model to the target device after loading the state dict
-    #ae.to(device)
     print_num_params(ae, "AutoEncoder")
-
     return ae
 
 def load_controlnet(
