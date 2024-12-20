@@ -528,9 +528,14 @@ def train(args):
             for parameter in param_group["params"]:
                 if parameter.requires_grad:
 
-                    def __grad_hook(tensor: torch.Tensor, param_group=param_group):
-                        if accelerator.sync_gradients and args.max_grad_norm != 0.0:
-                            accelerator.clip_grad_norm_(tensor, args.max_grad_norm)
+                    def __grad_hook(
+                        tensor: torch.Tensor,
+                        param_group=param_group,
+                        allow_unscale=optimizer.allow_unscale,
+                    ):
+                        if accelerator.sync_gradients and allow_unscale and args.max_grad_norm != 0.0:
+                            # only unscale when needed
+                            accelerator._unscale_grads(optimizer, inv_scale=None, found_inf=None)
                         optimizer.step_param(tensor, param_group)
                         tensor.grad = None
 
