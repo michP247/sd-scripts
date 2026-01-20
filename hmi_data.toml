@@ -5,7 +5,7 @@ caption_extension = ".txt"
 enable_bucket = true
 bucket_no_upscale = false
 max_bucket_reso = 2048
-batch_size = 1
+batch_size = 2
 keep_tokens = 1
 #caption_dropout_rate = 0.05
 

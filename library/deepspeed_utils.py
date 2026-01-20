@@ -183,8 +183,8 @@ def prepare_deepspeed_plugin(args: argparse.Namespace):
                 ds_config["zero_optimization"]["offload_optimizer"]["nvme_path"] = args.offload_optimizer_nvme_path
 
     # Add memory optimization settings for Stage 3
-    """ if args.zero_stage == 3:
-        # Optimize for low VRAM (6GB)
+    if args.zero_stage == 3:
+        # Optimize for low VRAM
         ds_config.update({
             "stage3_max_live_parameters": int(5e5),
             "stage3_max_reuse_distance": int(5e5),
@@ -207,7 +207,7 @@ def prepare_deepspeed_plugin(args: argparse.Namespace):
             "overlap_comm":  True,
             "contiguous_gradients": True,
             "reduce_scatter": True,
-        }) """
+        })
 
     # Configure AIO if any NVMe offloading is used
     is_optimizer_nvme_offload = args.zero_stage >= 2 and args.offload_optimizer_device == "nvme"

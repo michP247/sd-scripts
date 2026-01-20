@@ -1,0 +1,1 @@
+1girl, fair skin, dark red hair, purple eyes, white shirt, denim shorts, shy expression, soft lighting, indoors, window, natural light --w 1024 --h 1024 --s 30 --l 7.0 --n low quality,
