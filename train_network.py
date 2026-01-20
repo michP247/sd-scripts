@@ -501,7 +501,7 @@ class NetworkTrainer:
         training_started_at = time.time()
         train_util.verify_training_args(args)
         train_util.prepare_dataset_args(args, True)
-        deepspeed_utils.prepare_deepspeed_args(args)
+        #deepspeed_utils.prepare_deepspeed_args(args)
         setup_logging(args, reset=True)
 
         cache_latents = args.cache_latents
