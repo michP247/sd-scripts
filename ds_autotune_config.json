@@ -1,0 +1,29 @@
+{
+    "train_batch_size": "auto",
+    "train_micro_batch_size_per_gpu": 1,
+    "gradient_accumulation_steps": "auto",
+    "autotuning": {
+        "enabled": true,
+        "fast": false,
+        "results_dir": "autotuning_results",
+        "exps_dir": "autotuning_exps",
+        "arg_mappings": {
+            "train_micro_batch_size_per_gpu": "--train_batch_size"
+        }
+    },
+    "zero_optimization": {
+        "stage": 3,
+        "offload_optimizer": {
+            "device": "cpu",
+            "pin_memory": true
+        },
+        "offload_param": {
+            "device": "cpu",
+            "pin_memory": true
+        }
+    },
+    "bf16": {
+        "enabled": true
+    },
+    "memory_breakdown": false
+}

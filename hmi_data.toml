@@ -1,0 +1,23 @@
+[general]
+flip_aug = false
+#shuffle_caption = true
+caption_extension = ".txt"
+enable_bucket = true
+bucket_no_upscale = false
+max_bucket_reso = 2048
+batch_size = 1
+keep_tokens = 1
+#caption_dropout_rate = 0.05
+
+[[datasets]]
+resolution = [1024, 1024]
+
+  [[datasets.subsets]]
+  image_dir = "/home/en1u2/AI-Stuff/References/HSnew"
+  num_repeats = 1
+
+
+  # [[datasets.subsets]]
+  # is_reg = true
+  # image_dir = "/home/en1u2/AI-Stuff/sd-scripts/regs_sdxl"
+  # num_repeats = 1

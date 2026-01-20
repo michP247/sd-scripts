@@ -1,0 +1,14 @@
+[general]
+caption_extension = ".txt"
+enable_bucket = true
+bucket_no_upscale = false
+batch_size = 1
+
+[[datasets]]
+resolution = [1024, 1024]
+image_directory = "/home/en1u2/AI-Stuff/References/HSdata"
+
+#  [[datasets.subsets]]
+#  image_dir = "/home/en1u2/AI-Stuff/kohya_ss/outputs/reg/woman"
+#  num_repeats = 1
+#  is_reg = true

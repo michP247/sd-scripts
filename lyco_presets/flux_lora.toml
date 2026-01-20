@@ -1,0 +1,1182 @@
+enable_conv = false
+use_fnmatch = true
+unet_target_module = [ "DoubleStreamBlock", "SingleStreamBlock",]
+unet_target_name = [ "double_blocks.*", "single_blocks.*", "double_blocks.*.img_attn.*", "double_blocks.*.txt_attn.*", "double_blocks.*.img_mlp.*", "double_blocks.*.txt_mlp.*", "double_blocks.*.img_mod.*", "double_blocks.*.txt_mod.*", "single_blocks.*.linear1", "single_blocks.*.linear2", "single_blocks.*.modulation.*",]
+text_encoder_target_module = [ "CLIPAttention", "CLIPSdpaAttention", "CLIPMLP",]
+text_encoder_target_name = []
+
+[module_algo_map.DoubleStreamBlock]
+algo = "lora"
+
+[module_algo_map.SingleStreamBlock]
+algo = "lora"
+
+[module_algo_map.ResnetBlock2D]
+algo = "lora"
+dim = 40
+alpha = 40
+
+[module_algo_map.Downsample2D]
+algo = "lora"
+dim = 40
+alpha = 40
+
+[module_algo_map.Upsample2D]
+algo = "lora"
+dim = 40
+alpha = 40
+
+[module_algo_map.CLIPAttention]
+algo = "lora"
+dim = 48
+alpha = 48
+
+[module_algo_map.CLIPSdpaAttention]
+algo = "lora"
+dim = 48
+alpha = 48
+
+[module_algo_map.CLIPMLP]
+algo = "lora"
+dim = 40
+alpha = 40
+
+[name_algo_map."double_blocks.0.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.0.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.0.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.0.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.0.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.0.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.1.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.1.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.1.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.1.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.1.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.1.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.2.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.2.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.2.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.2.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.2.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.2.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.3.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.3.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.3.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.3.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.3.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.3.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.4.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.4.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.4.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.4.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.4.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.4.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.5.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.5.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.5.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.5.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.5.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.5.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.6.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.6.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.6.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.6.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.6.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.6.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.7.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.7.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.7.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.7.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.7.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.7.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.8.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.8.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.8.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.8.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.8.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.8.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.9.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.9.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.9.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.9.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.9.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.9.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.10.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.10.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.10.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.10.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.10.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.10.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.11.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.11.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.11.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.11.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.11.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.11.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.12.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.12.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.12.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.12.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.12.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.12.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.13.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.13.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.13.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.13.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.13.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.13.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.14.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.14.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.14.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.14.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.14.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.14.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.15.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.15.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.15.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.15.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.15.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.15.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.16.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.16.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.16.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.16.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.16.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.16.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.17.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.17.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.17.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.17.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.17.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.17.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.18.img_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.18.txt_attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.18.img_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.18.txt_mlp.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.18.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."double_blocks.18.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.0.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.0.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.0.modulation.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.1.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.1.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.1.modulation.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.2.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.2.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.2.modulation.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.3.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.3.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.3.modulation.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.4.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.4.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.4.modulation.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.5.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.5.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.5.modulation.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.6.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.6.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.6.modulation.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.7.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.7.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.7.modulation.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.8.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.8.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.8.modulation.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.9.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.9.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.9.modulation.*"]
+algo = "lora"
+dim = 62
+alpha = 62
+
+[name_algo_map."single_blocks.10.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.10.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.10.modulation.*"]
+algo = "lora"
+dim = 60
+alpha = 60
+
+[name_algo_map."single_blocks.11.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.11.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.11.modulation.*"]
+algo = "lora"
+dim = 57
+alpha = 57
+
+[name_algo_map."single_blocks.12.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.12.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.12.modulation.*"]
+algo = "lora"
+dim = 54
+alpha = 54
+
+[name_algo_map."single_blocks.13.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.13.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.13.modulation.*"]
+algo = "lora"
+dim = 54
+alpha = 54
+
+[name_algo_map."single_blocks.14.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.14.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.14.modulation.*"]
+algo = "lora"
+dim = 54
+alpha = 54
+
+[name_algo_map."single_blocks.15.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.15.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.15.modulation.*"]
+algo = "lora"
+dim = 55
+alpha = 55
+
+[name_algo_map."single_blocks.16.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.16.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.16.modulation.*"]
+algo = "lora"
+dim = 55
+alpha = 55
+
+[name_algo_map."single_blocks.17.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.17.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.17.modulation.*"]
+algo = "lora"
+dim = 55
+alpha = 55
+
+[name_algo_map."single_blocks.18.linear1"]
+algo = "lora"
+dim = 63
+alpha = 63
+
+[name_algo_map."single_blocks.18.linear2"]
+algo = "lora"
+dim = 63
+alpha = 63
+
+[name_algo_map."single_blocks.18.modulation.*"]
+algo = "lora"
+dim = 53
+alpha = 53
+
+[name_algo_map."single_blocks.19.linear1"]
+algo = "lora"
+dim = 63
+alpha = 63
+
+[name_algo_map."single_blocks.19.linear2"]
+algo = "lora"
+dim = 63
+alpha = 63
+
+[name_algo_map."single_blocks.19.modulation.*"]
+algo = "lora"
+dim = 52
+alpha = 52
+
+[name_algo_map."single_blocks.20.linear1"]
+algo = "lora"
+dim = 63
+alpha = 63
+
+[name_algo_map."single_blocks.20.linear2"]
+algo = "lora"
+dim = 63
+alpha = 63
+
+[name_algo_map."single_blocks.20.modulation.*"]
+algo = "lora"
+dim = 52
+alpha = 52
+
+[name_algo_map."single_blocks.21.linear1"]
+algo = "lora"
+dim = 57
+alpha = 57
+
+[name_algo_map."single_blocks.21.linear2"]
+algo = "lora"
+dim = 57
+alpha = 57
+
+[name_algo_map."single_blocks.21.modulation.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+
+[name_algo_map."single_blocks.22.linear1"]
+algo = "lora"
+dim = 55
+alpha = 55
+
+[name_algo_map."single_blocks.22.linear2"]
+algo = "lora"
+dim = 55
+alpha = 55
+
+[name_algo_map."single_blocks.22.modulation.*"]
+algo = "lora"
+dim = 46
+alpha = 46
+
+[name_algo_map."single_blocks.23.linear1"]
+algo = "lora"
+dim = 50
+alpha = 50
+
+[name_algo_map."single_blocks.23.linear2"]
+algo = "lora"
+dim = 50
+alpha = 50
+
+[name_algo_map."single_blocks.23.modulation.*"]
+algo = "lora"
+dim = 42
+alpha = 42
+
+[name_algo_map."single_blocks.24.linear1"]
+algo = "lora"
+dim = 49
+alpha = 49
+
+[name_algo_map."single_blocks.24.linear2"]
+algo = "lora"
+dim = 49
+alpha = 49
+
+[name_algo_map."single_blocks.24.modulation.*"]
+algo = "lora"
+dim = 41
+alpha = 41
+
+[name_algo_map."single_blocks.25.linear1"]
+algo = "lora"
+dim = 42
+alpha = 42
+
+[name_algo_map."single_blocks.25.linear2"]
+algo = "lora"
+dim = 42
+alpha = 42
+
+[name_algo_map."single_blocks.25.modulation.*"]
+algo = "lora"
+dim = 35
+alpha = 35
+
+[name_algo_map."single_blocks.26.linear1"]
+algo = "lora"
+dim = 38
+alpha = 38
+
+[name_algo_map."single_blocks.26.linear2"]
+algo = "lora"
+dim = 38
+alpha = 38
+
+[name_algo_map."single_blocks.26.modulation.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+
+[name_algo_map."single_blocks.27.linear1"]
+algo = "lora"
+dim = 33
+alpha = 33
+
+[name_algo_map."single_blocks.27.linear2"]
+algo = "lora"
+dim = 33
+alpha = 33
+
+[name_algo_map."single_blocks.27.modulation.*"]
+algo = "lora"
+dim = 28
+alpha = 28
+
+[name_algo_map."single_blocks.28.linear1"]
+algo = "lora"
+dim = 26
+alpha = 26
+
+[name_algo_map."single_blocks.28.linear2"]
+algo = "lora"
+dim = 26
+alpha = 26
+
+[name_algo_map."single_blocks.28.modulation.*"]
+algo = "lora"
+dim = 22
+alpha = 22
+
+[name_algo_map."single_blocks.29.linear1"]
+algo = "lora"
+dim = 32
+alpha = 32
+
+[name_algo_map."single_blocks.29.linear2"]
+algo = "lora"
+dim = 32
+alpha = 32
+
+[name_algo_map."single_blocks.29.modulation.*"]
+algo = "lora"
+dim = 27
+alpha = 27
+
+[name_algo_map."single_blocks.30.linear1"]
+algo = "lora"
+dim = 20
+alpha = 20
+
+[name_algo_map."single_blocks.30.linear2"]
+algo = "lora"
+dim = 20
+alpha = 20
+
+[name_algo_map."single_blocks.30.modulation.*"]
+algo = "lora"
+dim = 16
+alpha = 16
+
+[name_algo_map."single_blocks.31.linear1"]
+algo = "lora"
+dim = 12
+alpha = 12
+
+[name_algo_map."single_blocks.31.linear2"]
+algo = "lora"
+dim = 12
+alpha = 12
+
+[name_algo_map."single_blocks.31.modulation.*"]
+algo = "lora"
+dim = 10
+alpha = 10
+
+[name_algo_map."single_blocks.32.linear1"]
+algo = "lora"
+dim = 12
+alpha = 12
+
+[name_algo_map."single_blocks.32.linear2"]
+algo = "lora"
+dim = 12
+alpha = 12
+
+[name_algo_map."single_blocks.32.modulation.*"]
+algo = "lora"
+dim = 10
+alpha = 10
+
+[name_algo_map."single_blocks.33.linear1"]
+algo = "lora"
+dim = 8
+alpha = 8
+
+[name_algo_map."single_blocks.33.linear2"]
+algo = "lora"
+dim = 8
+alpha = 8
+
+[name_algo_map."single_blocks.33.modulation.*"]
+algo = "lora"
+dim = 7
+alpha = 7
+
+[name_algo_map."single_blocks.34.linear1"]
+algo = "lora"
+dim = 5
+alpha = 5
+
+[name_algo_map."single_blocks.34.linear2"]
+algo = "lora"
+dim = 5
+alpha = 5
+
+[name_algo_map."single_blocks.34.modulation.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+
+[name_algo_map."single_blocks.35.linear1"]
+algo = "lora"
+dim = 8
+alpha = 8
+
+[name_algo_map."single_blocks.35.linear2"]
+algo = "lora"
+dim = 8
+alpha = 8
+
+[name_algo_map."single_blocks.35.modulation.*"]
+algo = "lora"
+dim = 6
+alpha = 6
+
+[name_algo_map."single_blocks.36.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.36.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.36.modulation.*"]
+algo = "lora"
+dim = 58
+alpha = 58
+
+[name_algo_map."single_blocks.37.linear1"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.37.linear2"]
+algo = "lora"
+dim = 64
+alpha = 64
+
+[name_algo_map."single_blocks.37.modulation.*"]
+algo = "lora"
+dim = 64
+alpha = 64

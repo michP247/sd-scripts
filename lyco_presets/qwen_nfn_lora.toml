@@ -1,0 +1,3281 @@
+enable_conv = false
+use_fnmatch = true
+unet_target_module = [ "QwenImageTransformerBlock",]
+unet_target_name = [ "transformer_blocks.*",]
+text_encoder_target_module = [ "CLIPAttention", "CLIPSdpaAttention", "CLIPMLP",]
+text_encoder_target_name = []
+
+[module_algo_map.QwenImageTransformerBlock]
+algo = "lora"
+dim = 48
+alpha = 48
+
+[module_algo_map.ResnetBlock2D]
+algo = "lora"
+dim = 40
+alpha = 40
+
+[module_algo_map.Downsample2D]
+algo = "lora"
+dim = 40
+alpha = 40
+
+[module_algo_map.Upsample2D]
+algo = "lora"
+dim = 40
+alpha = 40
+
+[module_algo_map.CLIPAttention]
+algo = "lora"
+dim = 48
+alpha = 48
+
+[module_algo_map.CLIPSdpaAttention]
+algo = "lora"
+dim = 48
+alpha = 48
+
+[module_algo_map.CLIPMLP]
+algo = "lora"
+dim = 40
+alpha = 40
+
+[name_algo_map."transformer_blocks.0.attn.*"]
+algo = "lora"
+dim = 53
+alpha = 53
+dora_wd = true
+
+[name_algo_map."transformer_blocks.0.img_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.0.txt_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.0.img_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.0.txt_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.0.img_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.0.img_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.0.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.0.txt_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.1.attn.*"]
+algo = "lora"
+dim = 5
+alpha = 5
+dora_wd = true
+
+[name_algo_map."transformer_blocks.1.img_mlp_net.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.1.txt_mlp_net.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.1.img_mod.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.1.txt_mod.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.1.img_mlp_net.0.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.1.img_mlp_net.2"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.1.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.1.txt_mlp_net.2"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.2.attn.*"]
+algo = "lora"
+dim = 23
+alpha = 23
+dora_wd = true
+
+[name_algo_map."transformer_blocks.2.img_mlp_net.*"]
+algo = "lora"
+dim = 19
+alpha = 19
+dora_wd = true
+
+[name_algo_map."transformer_blocks.2.txt_mlp_net.*"]
+algo = "lora"
+dim = 19
+alpha = 19
+dora_wd = true
+
+[name_algo_map."transformer_blocks.2.img_mod.*"]
+algo = "lora"
+dim = 19
+alpha = 19
+dora_wd = true
+
+[name_algo_map."transformer_blocks.2.txt_mod.*"]
+algo = "lora"
+dim = 19
+alpha = 19
+dora_wd = true
+
+[name_algo_map."transformer_blocks.2.img_mlp_net.0.*"]
+algo = "lora"
+dim = 19
+alpha = 19
+dora_wd = true
+
+[name_algo_map."transformer_blocks.2.img_mlp_net.2"]
+algo = "lora"
+dim = 19
+alpha = 19
+dora_wd = true
+
+[name_algo_map."transformer_blocks.2.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 19
+alpha = 19
+dora_wd = true
+
+[name_algo_map."transformer_blocks.2.txt_mlp_net.2"]
+algo = "lora"
+dim = 19
+alpha = 19
+dora_wd = true
+
+[name_algo_map."transformer_blocks.3.attn.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.3.img_mlp_net.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.3.txt_mlp_net.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.3.img_mod.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.3.txt_mod.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.3.img_mlp_net.0.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.3.img_mlp_net.2"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.3.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.3.txt_mlp_net.2"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.4.attn.*"]
+algo = "lora"
+dim = 41
+alpha = 41
+dora_wd = true
+
+[name_algo_map."transformer_blocks.4.img_mlp_net.*"]
+algo = "lora"
+dim = 34
+alpha = 34
+dora_wd = true
+
+[name_algo_map."transformer_blocks.4.txt_mlp_net.*"]
+algo = "lora"
+dim = 34
+alpha = 34
+dora_wd = true
+
+[name_algo_map."transformer_blocks.4.img_mod.*"]
+algo = "lora"
+dim = 34
+alpha = 34
+dora_wd = true
+
+[name_algo_map."transformer_blocks.4.txt_mod.*"]
+algo = "lora"
+dim = 34
+alpha = 34
+dora_wd = true
+
+[name_algo_map."transformer_blocks.4.img_mlp_net.0.*"]
+algo = "lora"
+dim = 34
+alpha = 34
+dora_wd = true
+
+[name_algo_map."transformer_blocks.4.img_mlp_net.2"]
+algo = "lora"
+dim = 34
+alpha = 34
+dora_wd = true
+
+[name_algo_map."transformer_blocks.4.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 34
+alpha = 34
+dora_wd = true
+
+[name_algo_map."transformer_blocks.4.txt_mlp_net.2"]
+algo = "lora"
+dim = 34
+alpha = 34
+dora_wd = true
+
+[name_algo_map."transformer_blocks.5.attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.5.img_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.5.txt_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.5.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.5.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.5.img_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.5.img_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.5.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.5.txt_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.6.attn.*"]
+algo = "lora"
+dim = 22
+alpha = 22
+dora_wd = true
+
+[name_algo_map."transformer_blocks.6.img_mlp_net.*"]
+algo = "lora"
+dim = 18
+alpha = 18
+dora_wd = true
+
+[name_algo_map."transformer_blocks.6.txt_mlp_net.*"]
+algo = "lora"
+dim = 18
+alpha = 18
+dora_wd = true
+
+[name_algo_map."transformer_blocks.6.img_mod.*"]
+algo = "lora"
+dim = 18
+alpha = 18
+dora_wd = true
+
+[name_algo_map."transformer_blocks.6.txt_mod.*"]
+algo = "lora"
+dim = 18
+alpha = 18
+dora_wd = true
+
+[name_algo_map."transformer_blocks.6.img_mlp_net.0.*"]
+algo = "lora"
+dim = 18
+alpha = 18
+dora_wd = true
+
+[name_algo_map."transformer_blocks.6.img_mlp_net.2"]
+algo = "lora"
+dim = 18
+alpha = 18
+dora_wd = true
+
+[name_algo_map."transformer_blocks.6.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 18
+alpha = 18
+dora_wd = true
+
+[name_algo_map."transformer_blocks.6.txt_mlp_net.2"]
+algo = "lora"
+dim = 18
+alpha = 18
+dora_wd = true
+
+[name_algo_map."transformer_blocks.7.attn.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.7.img_mlp_net.*"]
+algo = "lora"
+dim = 24
+alpha = 24
+dora_wd = true
+
+[name_algo_map."transformer_blocks.7.txt_mlp_net.*"]
+algo = "lora"
+dim = 24
+alpha = 24
+dora_wd = true
+
+[name_algo_map."transformer_blocks.7.img_mod.*"]
+algo = "lora"
+dim = 24
+alpha = 24
+dora_wd = true
+
+[name_algo_map."transformer_blocks.7.txt_mod.*"]
+algo = "lora"
+dim = 24
+alpha = 24
+dora_wd = true
+
+[name_algo_map."transformer_blocks.7.img_mlp_net.0.*"]
+algo = "lora"
+dim = 24
+alpha = 24
+dora_wd = true
+
+[name_algo_map."transformer_blocks.7.img_mlp_net.2"]
+algo = "lora"
+dim = 24
+alpha = 24
+dora_wd = true
+
+[name_algo_map."transformer_blocks.7.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 24
+alpha = 24
+dora_wd = true
+
+[name_algo_map."transformer_blocks.7.txt_mlp_net.2"]
+algo = "lora"
+dim = 24
+alpha = 24
+dora_wd = true
+
+[name_algo_map."transformer_blocks.8.attn.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.8.img_mlp_net.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.8.txt_mlp_net.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.8.img_mod.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.8.txt_mod.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.8.img_mlp_net.0.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.8.img_mlp_net.2"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.8.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.8.txt_mlp_net.2"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.9.attn.*"]
+algo = "lora"
+dim = 45
+alpha = 45
+dora_wd = true
+
+[name_algo_map."transformer_blocks.9.img_mlp_net.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.9.txt_mlp_net.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.9.img_mod.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.9.txt_mod.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.9.img_mlp_net.0.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.9.img_mlp_net.2"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.9.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.9.txt_mlp_net.2"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.10.attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.10.img_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.10.txt_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.10.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.10.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.10.img_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.10.img_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.10.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.10.txt_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.11.attn.*"]
+algo = "lora"
+dim = 27
+alpha = 27
+dora_wd = true
+
+[name_algo_map."transformer_blocks.11.img_mlp_net.*"]
+algo = "lora"
+dim = 23
+alpha = 23
+dora_wd = true
+
+[name_algo_map."transformer_blocks.11.txt_mlp_net.*"]
+algo = "lora"
+dim = 23
+alpha = 23
+dora_wd = true
+
+[name_algo_map."transformer_blocks.11.img_mod.*"]
+algo = "lora"
+dim = 23
+alpha = 23
+dora_wd = true
+
+[name_algo_map."transformer_blocks.11.txt_mod.*"]
+algo = "lora"
+dim = 23
+alpha = 23
+dora_wd = true
+
+[name_algo_map."transformer_blocks.11.img_mlp_net.0.*"]
+algo = "lora"
+dim = 23
+alpha = 23
+dora_wd = true
+
+[name_algo_map."transformer_blocks.11.img_mlp_net.2"]
+algo = "lora"
+dim = 23
+alpha = 23
+dora_wd = true
+
+[name_algo_map."transformer_blocks.11.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 23
+alpha = 23
+dora_wd = true
+
+[name_algo_map."transformer_blocks.11.txt_mlp_net.2"]
+algo = "lora"
+dim = 23
+alpha = 23
+dora_wd = true
+
+[name_algo_map."transformer_blocks.12.attn.*"]
+algo = "lora"
+dim = 35
+alpha = 35
+dora_wd = true
+
+[name_algo_map."transformer_blocks.12.img_mlp_net.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.12.txt_mlp_net.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.12.img_mod.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.12.txt_mod.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.12.img_mlp_net.0.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.12.img_mlp_net.2"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.12.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.12.txt_mlp_net.2"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.13.attn.*"]
+algo = "lora"
+dim = 42
+alpha = 42
+dora_wd = true
+
+[name_algo_map."transformer_blocks.13.img_mlp_net.*"]
+algo = "lora"
+dim = 35
+alpha = 35
+dora_wd = true
+
+[name_algo_map."transformer_blocks.13.txt_mlp_net.*"]
+algo = "lora"
+dim = 35
+alpha = 35
+dora_wd = true
+
+[name_algo_map."transformer_blocks.13.img_mod.*"]
+algo = "lora"
+dim = 35
+alpha = 35
+dora_wd = true
+
+[name_algo_map."transformer_blocks.13.txt_mod.*"]
+algo = "lora"
+dim = 35
+alpha = 35
+dora_wd = true
+
+[name_algo_map."transformer_blocks.13.img_mlp_net.0.*"]
+algo = "lora"
+dim = 35
+alpha = 35
+dora_wd = true
+
+[name_algo_map."transformer_blocks.13.img_mlp_net.2"]
+algo = "lora"
+dim = 35
+alpha = 35
+dora_wd = true
+
+[name_algo_map."transformer_blocks.13.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 35
+alpha = 35
+dora_wd = true
+
+[name_algo_map."transformer_blocks.13.txt_mlp_net.2"]
+algo = "lora"
+dim = 35
+alpha = 35
+dora_wd = true
+
+[name_algo_map."transformer_blocks.14.attn.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.14.img_mlp_net.*"]
+algo = "lora"
+dim = 41
+alpha = 41
+dora_wd = true
+
+[name_algo_map."transformer_blocks.14.txt_mlp_net.*"]
+algo = "lora"
+dim = 41
+alpha = 41
+dora_wd = true
+
+[name_algo_map."transformer_blocks.14.img_mod.*"]
+algo = "lora"
+dim = 41
+alpha = 41
+dora_wd = true
+
+[name_algo_map."transformer_blocks.14.txt_mod.*"]
+algo = "lora"
+dim = 41
+alpha = 41
+dora_wd = true
+
+[name_algo_map."transformer_blocks.14.img_mlp_net.0.*"]
+algo = "lora"
+dim = 41
+alpha = 41
+dora_wd = true
+
+[name_algo_map."transformer_blocks.14.img_mlp_net.2"]
+algo = "lora"
+dim = 41
+alpha = 41
+dora_wd = true
+
+[name_algo_map."transformer_blocks.14.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 41
+alpha = 41
+dora_wd = true
+
+[name_algo_map."transformer_blocks.14.txt_mlp_net.2"]
+algo = "lora"
+dim = 41
+alpha = 41
+dora_wd = true
+
+[name_algo_map."transformer_blocks.15.attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.15.img_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.15.txt_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.15.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.15.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.15.img_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.15.img_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.15.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.15.txt_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.16.attn.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.16.img_mlp_net.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.16.txt_mlp_net.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.16.img_mod.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.16.txt_mod.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.16.img_mlp_net.0.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.16.img_mlp_net.2"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.16.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.16.txt_mlp_net.2"]
+algo = "lora"
+dim = 26
+alpha = 26
+dora_wd = true
+
+[name_algo_map."transformer_blocks.17.attn.*"]
+algo = "lora"
+dim = 40
+alpha = 40
+dora_wd = true
+
+[name_algo_map."transformer_blocks.17.img_mlp_net.*"]
+algo = "lora"
+dim = 33
+alpha = 33
+dora_wd = true
+
+[name_algo_map."transformer_blocks.17.txt_mlp_net.*"]
+algo = "lora"
+dim = 33
+alpha = 33
+dora_wd = true
+
+[name_algo_map."transformer_blocks.17.img_mod.*"]
+algo = "lora"
+dim = 33
+alpha = 33
+dora_wd = true
+
+[name_algo_map."transformer_blocks.17.txt_mod.*"]
+algo = "lora"
+dim = 33
+alpha = 33
+dora_wd = true
+
+[name_algo_map."transformer_blocks.17.img_mlp_net.0.*"]
+algo = "lora"
+dim = 33
+alpha = 33
+dora_wd = true
+
+[name_algo_map."transformer_blocks.17.img_mlp_net.2"]
+algo = "lora"
+dim = 33
+alpha = 33
+dora_wd = true
+
+[name_algo_map."transformer_blocks.17.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 33
+alpha = 33
+dora_wd = true
+
+[name_algo_map."transformer_blocks.17.txt_mlp_net.2"]
+algo = "lora"
+dim = 33
+alpha = 33
+dora_wd = true
+
+[name_algo_map."transformer_blocks.18.attn.*"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.18.img_mlp_net.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.18.txt_mlp_net.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.18.img_mod.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.18.txt_mod.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.18.img_mlp_net.0.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.18.img_mlp_net.2"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.18.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.18.txt_mlp_net.2"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.19.attn.*"]
+algo = "lora"
+dim = 53
+alpha = 53
+dora_wd = true
+
+[name_algo_map."transformer_blocks.19.img_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.19.txt_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.19.img_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.19.txt_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.19.img_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.19.img_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.19.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.19.txt_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.20.attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.20.img_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.20.txt_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.20.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.20.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.20.img_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.20.img_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.20.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.20.txt_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.21.attn.*"]
+algo = "lora"
+dim = 35
+alpha = 35
+dora_wd = true
+
+[name_algo_map."transformer_blocks.21.img_mlp_net.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.21.txt_mlp_net.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.21.img_mod.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.21.txt_mod.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.21.img_mlp_net.0.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.21.img_mlp_net.2"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.21.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.21.txt_mlp_net.2"]
+algo = "lora"
+dim = 29
+alpha = 29
+dora_wd = true
+
+[name_algo_map."transformer_blocks.22.attn.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.22.img_mlp_net.*"]
+algo = "lora"
+dim = 36
+alpha = 36
+dora_wd = true
+
+[name_algo_map."transformer_blocks.22.txt_mlp_net.*"]
+algo = "lora"
+dim = 36
+alpha = 36
+dora_wd = true
+
+[name_algo_map."transformer_blocks.22.img_mod.*"]
+algo = "lora"
+dim = 36
+alpha = 36
+dora_wd = true
+
+[name_algo_map."transformer_blocks.22.txt_mod.*"]
+algo = "lora"
+dim = 36
+alpha = 36
+dora_wd = true
+
+[name_algo_map."transformer_blocks.22.img_mlp_net.0.*"]
+algo = "lora"
+dim = 36
+alpha = 36
+dora_wd = true
+
+[name_algo_map."transformer_blocks.22.img_mlp_net.2"]
+algo = "lora"
+dim = 36
+alpha = 36
+dora_wd = true
+
+[name_algo_map."transformer_blocks.22.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 36
+alpha = 36
+dora_wd = true
+
+[name_algo_map."transformer_blocks.22.txt_mlp_net.2"]
+algo = "lora"
+dim = 36
+alpha = 36
+dora_wd = true
+
+[name_algo_map."transformer_blocks.23.attn.*"]
+algo = "lora"
+dim = 5
+alpha = 5
+dora_wd = true
+
+[name_algo_map."transformer_blocks.23.img_mlp_net.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.23.txt_mlp_net.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.23.img_mod.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.23.txt_mod.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.23.img_mlp_net.0.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.23.img_mlp_net.2"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.23.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.23.txt_mlp_net.2"]
+algo = "lora"
+dim = 4
+alpha = 4
+dora_wd = true
+
+[name_algo_map."transformer_blocks.24.attn.*"]
+algo = "lora"
+dim = 56
+alpha = 56
+dora_wd = true
+
+[name_algo_map."transformer_blocks.24.img_mlp_net.*"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.24.txt_mlp_net.*"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.24.img_mod.*"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.24.txt_mod.*"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.24.img_mlp_net.0.*"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.24.img_mlp_net.2"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.24.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.24.txt_mlp_net.2"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.25.attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.25.img_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.25.txt_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.25.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.25.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.25.img_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.25.img_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.25.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.25.txt_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.26.attn.*"]
+algo = "lora"
+dim = 36
+alpha = 36
+dora_wd = true
+
+[name_algo_map."transformer_blocks.26.img_mlp_net.*"]
+algo = "lora"
+dim = 30
+alpha = 30
+dora_wd = true
+
+[name_algo_map."transformer_blocks.26.txt_mlp_net.*"]
+algo = "lora"
+dim = 30
+alpha = 30
+dora_wd = true
+
+[name_algo_map."transformer_blocks.26.img_mod.*"]
+algo = "lora"
+dim = 30
+alpha = 30
+dora_wd = true
+
+[name_algo_map."transformer_blocks.26.txt_mod.*"]
+algo = "lora"
+dim = 30
+alpha = 30
+dora_wd = true
+
+[name_algo_map."transformer_blocks.26.img_mlp_net.0.*"]
+algo = "lora"
+dim = 30
+alpha = 30
+dora_wd = true
+
+[name_algo_map."transformer_blocks.26.img_mlp_net.2"]
+algo = "lora"
+dim = 30
+alpha = 30
+dora_wd = true
+
+[name_algo_map."transformer_blocks.26.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 30
+alpha = 30
+dora_wd = true
+
+[name_algo_map."transformer_blocks.26.txt_mlp_net.2"]
+algo = "lora"
+dim = 30
+alpha = 30
+dora_wd = true
+
+[name_algo_map."transformer_blocks.27.attn.*"]
+algo = "lora"
+dim = 45
+alpha = 45
+dora_wd = true
+
+[name_algo_map."transformer_blocks.27.img_mlp_net.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.27.txt_mlp_net.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.27.img_mod.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.27.txt_mod.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.27.img_mlp_net.0.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.27.img_mlp_net.2"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.27.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.27.txt_mlp_net.2"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.28.attn.*"]
+algo = "lora"
+dim = 51
+alpha = 51
+dora_wd = true
+
+[name_algo_map."transformer_blocks.28.img_mlp_net.*"]
+algo = "lora"
+dim = 42
+alpha = 42
+dora_wd = true
+
+[name_algo_map."transformer_blocks.28.txt_mlp_net.*"]
+algo = "lora"
+dim = 42
+alpha = 42
+dora_wd = true
+
+[name_algo_map."transformer_blocks.28.img_mod.*"]
+algo = "lora"
+dim = 42
+alpha = 42
+dora_wd = true
+
+[name_algo_map."transformer_blocks.28.txt_mod.*"]
+algo = "lora"
+dim = 42
+alpha = 42
+dora_wd = true
+
+[name_algo_map."transformer_blocks.28.img_mlp_net.0.*"]
+algo = "lora"
+dim = 42
+alpha = 42
+dora_wd = true
+
+[name_algo_map."transformer_blocks.28.img_mlp_net.2"]
+algo = "lora"
+dim = 42
+alpha = 42
+dora_wd = true
+
+[name_algo_map."transformer_blocks.28.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 42
+alpha = 42
+dora_wd = true
+
+[name_algo_map."transformer_blocks.28.txt_mlp_net.2"]
+algo = "lora"
+dim = 42
+alpha = 42
+dora_wd = true
+
+[name_algo_map."transformer_blocks.29.attn.*"]
+algo = "lora"
+dim = 57
+alpha = 57
+dora_wd = true
+
+[name_algo_map."transformer_blocks.29.img_mlp_net.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.29.txt_mlp_net.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.29.img_mod.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.29.txt_mod.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.29.img_mlp_net.0.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.29.img_mlp_net.2"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.29.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.29.txt_mlp_net.2"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.30.attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.30.img_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.30.txt_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.30.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.30.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.30.img_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.30.img_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.30.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.30.txt_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.31.attn.*"]
+algo = "lora"
+dim = 37
+alpha = 37
+dora_wd = true
+
+[name_algo_map."transformer_blocks.31.img_mlp_net.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.31.txt_mlp_net.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.31.img_mod.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.31.txt_mod.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.31.img_mlp_net.0.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.31.img_mlp_net.2"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.31.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.31.txt_mlp_net.2"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.32.attn.*"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.32.img_mlp_net.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.32.txt_mlp_net.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.32.img_mod.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.32.txt_mod.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.32.img_mlp_net.0.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.32.img_mlp_net.2"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.32.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.32.txt_mlp_net.2"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.33.attn.*"]
+algo = "lora"
+dim = 52
+alpha = 52
+dora_wd = true
+
+[name_algo_map."transformer_blocks.33.img_mlp_net.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.33.txt_mlp_net.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.33.img_mod.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.33.txt_mod.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.33.img_mlp_net.0.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.33.img_mlp_net.2"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.33.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.33.txt_mlp_net.2"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.34.attn.*"]
+algo = "lora"
+dim = 58
+alpha = 58
+dora_wd = true
+
+[name_algo_map."transformer_blocks.34.img_mlp_net.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.34.txt_mlp_net.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.34.img_mod.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.34.txt_mod.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.34.img_mlp_net.0.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.34.img_mlp_net.2"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.34.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.34.txt_mlp_net.2"]
+algo = "lora"
+dim = 48
+alpha = 48
+dora_wd = true
+
+[name_algo_map."transformer_blocks.35.attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.35.img_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.35.txt_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.35.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.35.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.35.img_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.35.img_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.35.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.35.txt_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.36.attn.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.36.img_mlp_net.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.36.txt_mlp_net.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.36.img_mod.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.36.txt_mod.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.36.img_mlp_net.0.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.36.img_mlp_net.2"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.36.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.36.txt_mlp_net.2"]
+algo = "lora"
+dim = 31
+alpha = 31
+dora_wd = true
+
+[name_algo_map."transformer_blocks.37.attn.*"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.37.img_mlp_net.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.37.txt_mlp_net.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.37.img_mod.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.37.txt_mod.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.37.img_mlp_net.0.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.37.img_mlp_net.2"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.37.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.37.txt_mlp_net.2"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.38.attn.*"]
+algo = "lora"
+dim = 52
+alpha = 52
+dora_wd = true
+
+[name_algo_map."transformer_blocks.38.img_mlp_net.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.38.txt_mlp_net.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.38.img_mod.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.38.txt_mod.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.38.img_mlp_net.0.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.38.img_mlp_net.2"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.38.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.38.txt_mlp_net.2"]
+algo = "lora"
+dim = 43
+alpha = 43
+dora_wd = true
+
+[name_algo_map."transformer_blocks.39.attn.*"]
+algo = "lora"
+dim = 58
+alpha = 58
+dora_wd = true
+
+[name_algo_map."transformer_blocks.39.img_mlp_net.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.39.txt_mlp_net.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.39.img_mod.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.39.txt_mod.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.39.img_mlp_net.0.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.39.img_mlp_net.2"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.39.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.39.txt_mlp_net.2"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.40.attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.40.img_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.40.txt_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.40.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.40.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.40.img_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.40.img_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.40.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.40.txt_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.41.attn.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.41.img_mlp_net.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.41.txt_mlp_net.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.41.img_mod.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.41.txt_mod.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.41.img_mlp_net.0.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.41.img_mlp_net.2"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.41.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.41.txt_mlp_net.2"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.42.attn.*"]
+algo = "lora"
+dim = 46
+alpha = 46
+dora_wd = true
+
+[name_algo_map."transformer_blocks.42.img_mlp_net.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.42.txt_mlp_net.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.42.img_mod.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.42.txt_mod.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.42.img_mlp_net.0.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.42.img_mlp_net.2"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.42.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.42.txt_mlp_net.2"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.43.attn.*"]
+algo = "lora"
+dim = 53
+alpha = 53
+dora_wd = true
+
+[name_algo_map."transformer_blocks.43.img_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.43.txt_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.43.img_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.43.txt_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.43.img_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.43.img_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.43.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.43.txt_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.44.attn.*"]
+algo = "lora"
+dim = 59
+alpha = 59
+dora_wd = true
+
+[name_algo_map."transformer_blocks.44.img_mlp_net.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.44.txt_mlp_net.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.44.img_mod.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.44.txt_mod.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.44.img_mlp_net.0.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.44.img_mlp_net.2"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.44.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.44.txt_mlp_net.2"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.45.attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.45.img_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.45.txt_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.45.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.45.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.45.img_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.45.img_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.45.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.45.txt_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.46.attn.*"]
+algo = "lora"
+dim = 38
+alpha = 38
+dora_wd = true
+
+[name_algo_map."transformer_blocks.46.img_mlp_net.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.46.txt_mlp_net.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.46.img_mod.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.46.txt_mod.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.46.img_mlp_net.0.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.46.img_mlp_net.2"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.46.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.46.txt_mlp_net.2"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.47.attn.*"]
+algo = "lora"
+dim = 47
+alpha = 47
+dora_wd = true
+
+[name_algo_map."transformer_blocks.47.img_mlp_net.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.47.txt_mlp_net.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.47.img_mod.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.47.txt_mod.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.47.img_mlp_net.0.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.47.img_mlp_net.2"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.47.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.47.txt_mlp_net.2"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.48.attn.*"]
+algo = "lora"
+dim = 53
+alpha = 53
+dora_wd = true
+
+[name_algo_map."transformer_blocks.48.img_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.48.txt_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.48.img_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.48.txt_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.48.img_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.48.img_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.48.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.48.txt_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.49.attn.*"]
+algo = "lora"
+dim = 59
+alpha = 59
+dora_wd = true
+
+[name_algo_map."transformer_blocks.49.img_mlp_net.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.49.txt_mlp_net.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.49.img_mod.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.49.txt_mod.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.49.img_mlp_net.0.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.49.img_mlp_net.2"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.49.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.49.txt_mlp_net.2"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.50.attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.50.img_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.50.txt_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.50.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.50.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.50.img_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.50.img_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.50.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.50.txt_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.51.attn.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.51.img_mlp_net.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.51.txt_mlp_net.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.51.img_mod.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.51.txt_mod.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.51.img_mlp_net.0.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.51.img_mlp_net.2"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.51.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.51.txt_mlp_net.2"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.52.attn.*"]
+algo = "lora"
+dim = 47
+alpha = 47
+dora_wd = true
+
+[name_algo_map."transformer_blocks.52.img_mlp_net.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.52.txt_mlp_net.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.52.img_mod.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.52.txt_mod.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.52.img_mlp_net.0.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.52.img_mlp_net.2"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.52.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.52.txt_mlp_net.2"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.53.attn.*"]
+algo = "lora"
+dim = 53
+alpha = 53
+dora_wd = true
+
+[name_algo_map."transformer_blocks.53.img_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.53.txt_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.53.img_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.53.txt_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.53.img_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.53.img_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.53.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.53.txt_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.54.attn.*"]
+algo = "lora"
+dim = 59
+alpha = 59
+dora_wd = true
+
+[name_algo_map."transformer_blocks.54.img_mlp_net.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.54.txt_mlp_net.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.54.img_mod.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.54.txt_mod.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.54.img_mlp_net.0.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.54.img_mlp_net.2"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.54.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.54.txt_mlp_net.2"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.55.attn.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.55.img_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.55.txt_mlp_net.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.55.img_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.55.txt_mod.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.55.img_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.55.img_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.55.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.55.txt_mlp_net.2"]
+algo = "lora"
+dim = 64
+alpha = 64
+dora_wd = true
+
+[name_algo_map."transformer_blocks.56.attn.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.56.img_mlp_net.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.56.txt_mlp_net.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.56.img_mod.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.56.txt_mod.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.56.img_mlp_net.0.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.56.img_mlp_net.2"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.56.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.56.txt_mlp_net.2"]
+algo = "lora"
+dim = 32
+alpha = 32
+dora_wd = true
+
+[name_algo_map."transformer_blocks.57.attn.*"]
+algo = "lora"
+dim = 47
+alpha = 47
+dora_wd = true
+
+[name_algo_map."transformer_blocks.57.img_mlp_net.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.57.txt_mlp_net.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.57.img_mod.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.57.txt_mod.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.57.img_mlp_net.0.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.57.img_mlp_net.2"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.57.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.57.txt_mlp_net.2"]
+algo = "lora"
+dim = 39
+alpha = 39
+dora_wd = true
+
+[name_algo_map."transformer_blocks.58.attn.*"]
+algo = "lora"
+dim = 53
+alpha = 53
+dora_wd = true
+
+[name_algo_map."transformer_blocks.58.img_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.58.txt_mlp_net.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.58.img_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.58.txt_mod.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.58.img_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.58.img_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.58.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.58.txt_mlp_net.2"]
+algo = "lora"
+dim = 44
+alpha = 44
+dora_wd = true
+
+[name_algo_map."transformer_blocks.59.attn.*"]
+algo = "lora"
+dim = 59
+alpha = 59
+dora_wd = true
+
+[name_algo_map."transformer_blocks.59.img_mlp_net.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.59.txt_mlp_net.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.59.img_mod.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.59.txt_mod.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.59.img_mlp_net.0.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.59.img_mlp_net.2"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.59.txt_mlp_net.0.*"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true
+
+[name_algo_map."transformer_blocks.59.txt_mlp_net.2"]
+algo = "lora"
+dim = 49
+alpha = 49
+dora_wd = true

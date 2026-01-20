@@ -11,3 +11,10 @@ GEMINI.md
 .claude
 .gemini
 MagicMock
+/dataset
+/lycoris
+/regs
+/regs_jug
+/regs_real
+/regs_sdxl
+.env

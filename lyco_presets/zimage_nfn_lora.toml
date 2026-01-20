@@ -1,0 +1,225 @@
+enable_conv = false
+use_fnmatch = true
+unet_target_module = [ "ZImageTransformerBlock",]
+unet_target_name = [ "noise_refiner.*", "context_refiner.*", "layers.*",]
+text_encoder_target_module = [ "CLIPAttention", "CLIPSdpaAttention",]
+text_encoder_target_name = []
+
+[module_algo_map.ZImageTransformerBlock]
+algo = "lokr"
+dim = 48
+alpha = 48.0
+
+[module_algo_map.CLIPAttention]
+algo = "lokr"
+dim = 48
+alpha = 48.0
+
+[module_algo_map.CLIPSdpaAttention]
+algo = "lokr"
+dim = 48
+alpha = 48.0
+
+[name_algo_map."noise_refiner.0.attention.*"]
+algo = "lokr"
+dim = 24
+alpha = 24.0
+factor = 16
+
+[name_algo_map."noise_refiner.1.attention.*"]
+algo = "lokr"
+dim = 24
+alpha = 24.0
+factor = 15
+
+[name_algo_map."context_refiner.0.attention.*"]
+algo = "lokr"
+dim = 58
+alpha = 58.0
+factor = 9
+
+[name_algo_map."context_refiner.1.attention.*"]
+algo = "lokr"
+dim = 73
+alpha = 73.0
+factor = 7
+
+[name_algo_map."layers.0.attention.*"]
+algo = "lokr"
+dim = 56
+alpha = 56.0
+factor = 9
+
+[name_algo_map."layers.1.attention.*"]
+algo = "lokr"
+dim = 58
+alpha = 58.0
+factor = 9
+
+[name_algo_map."layers.2.attention.*"]
+algo = "lokr"
+dim = 70
+alpha = 70.0
+factor = 7
+
+[name_algo_map."layers.3.attention.*"]
+algo = "lokr"
+dim = 70
+alpha = 70.0
+factor = 7
+
+[name_algo_map."layers.4.attention.*"]
+algo = "lokr"
+dim = 65
+alpha = 65.0
+factor = 8
+
+[name_algo_map."layers.5.attention.*"]
+algo = "lokr"
+dim = 75
+alpha = 75.0
+factor = 7
+
+[name_algo_map."layers.6.attention.*"]
+algo = "lokr"
+dim = 65
+alpha = 65.0
+factor = 8
+
+[name_algo_map."layers.7.attention.*"]
+algo = "lokr"
+dim = 68
+alpha = 68.0
+factor = 8
+
+[name_algo_map."layers.8.attention.*"]
+algo = "lokr"
+dim = 72
+alpha = 72.0
+factor = 7
+
+[name_algo_map."layers.9.attention.*"]
+algo = "lokr"
+dim = 74
+alpha = 74.0
+factor = 7
+
+[name_algo_map."layers.10.attention.*"]
+algo = "lokr"
+dim = 82
+alpha = 82.0
+factor = 6
+
+[name_algo_map."layers.11.attention.*"]
+algo = "lokr"
+dim = 82
+alpha = 82.0
+factor = 6
+
+[name_algo_map."layers.12.attention.*"]
+algo = "lokr"
+dim = 85
+alpha = 85.0
+factor = 6
+
+[name_algo_map."layers.13.attention.*"]
+algo = "lokr"
+dim = 84
+alpha = 84.0
+factor = 6
+
+[name_algo_map."layers.14.attention.*"]
+algo = "lokr"
+dim = 86
+alpha = 86.0
+factor = 5
+
+[name_algo_map."layers.15.attention.*"]
+algo = "lokr"
+dim = 87
+alpha = 87.0
+factor = 5
+
+[name_algo_map."layers.16.attention.*"]
+algo = "lokr"
+dim = 85
+alpha = 85.0
+factor = 5
+
+[name_algo_map."layers.17.attention.*"]
+algo = "lokr"
+dim = 90
+alpha = 90.0
+factor = 5
+
+[name_algo_map."layers.18.attention.*"]
+algo = "lokr"
+dim = 91
+alpha = 91.0
+factor = 5
+
+[name_algo_map."layers.19.attention.*"]
+algo = "lokr"
+dim = 92
+alpha = 92.0
+factor = 5
+
+[name_algo_map."layers.20.attention.*"]
+algo = "lokr"
+dim = 92
+alpha = 92.0
+factor = 5
+
+[name_algo_map."layers.21.attention.*"]
+algo = "lokr"
+dim = 93
+alpha = 93.0
+factor = 4
+
+[name_algo_map."layers.22.attention.*"]
+algo = "lokr"
+dim = 94
+alpha = 94.0
+factor = 4
+
+[name_algo_map."layers.23.attention.*"]
+algo = "lokr"
+dim = 94
+alpha = 94.0
+factor = 4
+
+[name_algo_map."layers.24.attention.*"]
+algo = "lokr"
+dim = 94
+alpha = 94.0
+factor = 4
+
+[name_algo_map."layers.25.attention.*"]
+algo = "lokr"
+dim = 95
+alpha = 95.0
+factor = 4
+
+[name_algo_map."layers.26.attention.*"]
+algo = "lokr"
+dim = 96
+alpha = 96.0
+factor = 4
+
+[name_algo_map."layers.27.attention.*"]
+algo = "lokr"
+dim = 94
+alpha = 94.0
+factor = 4
+
+[name_algo_map."layers.28.attention.*"]
+algo = "lokr"
+dim = 92
+alpha = 92.0
+factor = 5
+
+[name_algo_map."layers.29.attention.*"]
+algo = "lokr"
+dim = 93
+alpha = 93.0
+factor = 4

@@ -1,0 +1,147 @@
+enable_conv = true
+use_fnmatch = true
+unet_target_module = [ "Transformer2DModel",]
+unet_target_name = [ "input_blocks.*", "middle_block.*", "output_blocks.*",]
+text_encoder_target_module = [ "CLIPAttention", "CLIPSdpaAttention",]
+text_encoder_target_name = []
+
+[module_algo_map.Transformer2DModel]
+algo = "lokr"
+dim = 48
+alpha = 48.0
+
+[module_algo_map.CLIPAttention]
+algo = "lokr"
+dim = 48
+alpha = 48.0
+
+[module_algo_map.CLIPSdpaAttention]
+algo = "lokr"
+dim = 48
+alpha = 48.0
+
+[name_algo_map."input_blocks.0.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 24
+alpha = 24.0
+factor = 16
+
+[name_algo_map."input_blocks.1.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 24
+alpha = 24.0
+factor = 16
+
+[name_algo_map."input_blocks.2.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 24
+alpha = 24.0
+factor = 16
+
+[name_algo_map."input_blocks.3.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 24
+alpha = 24.0
+factor = 16
+
+[name_algo_map."input_blocks.4.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 81
+alpha = 81.0
+factor = 6
+
+[name_algo_map."input_blocks.5.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 75
+alpha = 75.0
+factor = 7
+
+[name_algo_map."input_blocks.6.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 24
+alpha = 24.0
+factor = 16
+
+[name_algo_map."input_blocks.7.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 24
+alpha = 24.0
+factor = 16
+
+[name_algo_map."input_blocks.8.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 42
+alpha = 42.0
+factor = 11
+
+[name_algo_map."middle_block.0.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 32
+alpha = 32.0
+factor = 12
+
+[name_algo_map."middle_block.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 32
+alpha = 32.0
+factor = 12
+
+[name_algo_map."middle_block.2.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 32
+alpha = 32.0
+factor = 12
+
+[name_algo_map."output_blocks.0.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 76
+alpha = 76.0
+factor = 7
+
+[name_algo_map."output_blocks.1.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 85
+alpha = 85.0
+factor = 5
+
+[name_algo_map."output_blocks.2.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 73
+alpha = 73.0
+factor = 7
+
+[name_algo_map."output_blocks.3.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 96
+alpha = 96.0
+factor = 4
+
+[name_algo_map."output_blocks.4.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 79
+alpha = 79.0
+factor = 6
+
+[name_algo_map."output_blocks.5.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 80
+alpha = 80.0
+factor = 6
+
+[name_algo_map."output_blocks.6.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 24
+alpha = 24.0
+factor = 16
+
+[name_algo_map."output_blocks.7.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 24
+alpha = 24.0
+factor = 16
+
+[name_algo_map."output_blocks.8.1.transformer_blocks.*.attn*"]
+algo = "lokr"
+dim = 24
+alpha = 24.0
+factor = 16
