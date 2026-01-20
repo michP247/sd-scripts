@@ -1,12 +1,19 @@
 # latentsのdiskへの事前キャッシュを行う / cache latents to disk
 
+import sys
+import os
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import argparse
+
 import math
 from multiprocessing import Value
 import os
 
 from accelerate.utils import set_seed
 import torch
+from torch.utils.hooks import RemovableHandle
 from tqdm import tqdm
 
 from library import config_util, flux_train_utils, flux_utils, strategy_base, strategy_flux, strategy_sd, strategy_sdxl
@@ -27,7 +34,10 @@ logger = logging.getLogger(__name__)
 
 def set_tokenize_strategy(is_sd: bool, is_sdxl: bool, is_flux: bool, args: argparse.Namespace) -> None:
     if is_flux:
-        _, is_schnell, _ = flux_utils.check_flux_state_dict_diffusers_schnell(args.pretrained_model_name_or_path)
+        if getattr(args, "cache_t5_only", False):
+            is_schnell = False  # Chroma is not schnell, and we are caching for it
+        else:
+            _, is_schnell, _, _ = flux_utils.analyze_checkpoint_state(args.pretrained_model_name_or_path)
     else:
         is_schnell = False
 
@@ -142,10 +152,9 @@ def cache_to_disk(args: argparse.Namespace) -> None:
         vae = flux_utils.load_ae(args.ae, weight_dtype, "cpu", disable_mmap=args.disable_mmap_load_safetensors)
 
     if is_sd or is_sdxl:
-        if torch.__version__ >= "2.0.0":  # PyTorch 2.0.0 以上対応のxformersなら以下が使える
+        if torch.__version__ >= "2.0.0":
             vae.set_use_memory_efficient_attention_xformers(args.xformers)
 
-    vae.to(accelerator.device, dtype=vae_dtype)
     vae.requires_grad_(False)
     vae.eval()
 

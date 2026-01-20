@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import safetensors
 from accelerate import init_empty_weights
 from accelerate.utils.modeling import set_module_tensor_to_device
@@ -153,7 +154,23 @@ def _load_state_dict_on_device(model, state_dict, device, dtype=None):
     # similar to model.load_state_dict()
     if not missing_keys and not unexpected_keys:
         for k in list(state_dict.keys()):
-            set_module_tensor_to_device(model, k, device, value=state_dict.pop(k), dtype=dtype)
+            v = state_dict.pop(k)
+            # Safe set: if target param exists with zero shape (e.g., due to prior meta init), replace it
+            try:
+                module = model
+                parts = k.split('.')
+                for attr in parts[:-1]:
+                    module = getattr(module, attr)
+                name = parts[-1]
+                if hasattr(module, name):
+                    target = getattr(module, name)
+                    if isinstance(target, nn.Parameter) and target.numel() == 0 and v.numel() > 0:
+                        new_param = nn.Parameter(v.to(device=device, dtype=dtype if dtype is not None else v.dtype))
+                        setattr(module, name, new_param)
+                        continue
+            except Exception:
+                pass
+            set_module_tensor_to_device(model, k, device, value=v, dtype=dtype)
         return "<All keys matched successfully>"
 
     # error_msgs
@@ -166,7 +183,7 @@ def _load_state_dict_on_device(model, state_dict, device, dtype=None):
     raise RuntimeError("Error(s) in loading state_dict for {}:\n\t{}".format(model.__class__.__name__, "\n\t".join(error_msgs)))
 
 
-def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dtype=None, disable_mmap=False):
+def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dtype=None, disable_mmap=False, avoid_meta_text_encoders: bool = False):
     # model_version is reserved for future use
     # dtype is used for full_fp16/bf16 integration. Text Encoder will remain fp32, because it runs on CPU when caching
 
@@ -232,8 +249,12 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
         # torch_dtype="float32",
         # transformers_version="4.25.0.dev0",
     )
-    with init_empty_weights():
-        text_model1 = CLIPTextModel._from_config(text_model1_cfg)
+    if avoid_meta_text_encoders:
+        # Under DeepSpeed ZeRO-3, avoid creating meta tensors for TEs to prevent DS from copying out of meta.
+        text_model1 = CLIPTextModel(text_model1_cfg)
+    else:
+        with init_empty_weights():
+            text_model1 = CLIPTextModel._from_config(text_model1_cfg)
 
     # Text Encoder 2 is different from Stability AI's SDXL. SDXL uses open clip, but we use the model from HuggingFace.
     # Note: Tokenizer from HuggingFace is different from SDXL. We must use open clip's tokenizer.
@@ -258,8 +279,11 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
         # torch_dtype="float32",
         # transformers_version="4.25.0.dev0",
     )
-    with init_empty_weights():
+    if avoid_meta_text_encoders:
         text_model2 = CLIPTextModelWithProjection(text_model2_cfg)
+    else:
+        with init_empty_weights():
+            text_model2 = CLIPTextModelWithProjection(text_model2_cfg)
 
     logger.info("loading text encoders from checkpoint")
     te1_sd = {}
@@ -276,6 +300,14 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
 
     info1 = _load_state_dict_on_device(text_model1, te1_sd, device=map_location)  # remain fp32
     logger.info(f"text encoder 1: {info1}")
+    # Backup CLIP-L positional embedding to recover after DeepSpeed ZeRO-3 wrapping if needed
+    try:
+        te1_emb = text_model1.text_model.embeddings
+        if hasattr(te1_emb, 'position_embedding') and hasattr(te1_emb.position_embedding, 'weight'):
+            # store on CPU to avoid GPU pressure
+            text_model1._position_embedding_backup = te1_emb.position_embedding.weight.detach().cpu()
+    except Exception:
+        pass
 
     converted_sd, logit_scale = convert_sdxl_text_encoder_2_checkpoint(te2_sd, max_length=77)
     info2 = _load_state_dict_on_device(text_model2, converted_sd, device=map_location)  # remain fp32

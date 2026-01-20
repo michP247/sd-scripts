@@ -1,11 +1,17 @@
 # text encoder出力のdiskへの事前キャッシュを行う / cache text encoder outputs to disk in advance
 
+import sys
+import os
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import argparse
 import math
 from multiprocessing import Value
 import os
 
 from accelerate.utils import set_seed
+from accelerate import cpu_offload
 import torch
 from tqdm import tqdm
 
@@ -47,141 +53,163 @@ def cache_to_disk(args: argparse.Namespace) -> None:
     use_dreambooth_method = args.in_json is None
 
     if args.seed is not None:
-        set_seed(args.seed)  # 乱数系列を初期化する
+        set_seed(args.seed)
 
     is_sd = not args.sdxl and not args.flux
     is_sdxl = args.sdxl
     is_flux = args.flux
+    cache_t5_only = is_flux and getattr(args, "cache_t5_only", False)
 
-    assert (
-        is_sdxl or is_flux
-    ), "Cache text encoder outputs to disk is only supported for SDXL and FLUX models / テキストエンコーダ出力のディスクキャッシュはSDXLまたはFLUXでのみ有効です"
-    assert (
-        is_sdxl or args.weighted_captions is None
-    ), "Weighted captions are only supported for SDXL models / 重み付きキャプションはSDXLモデルでのみ有効です"
+    if not is_sdxl and args.weighted_captions:
+        raise ValueError("Weighted captions are only supported for SDXL models")
 
     set_tokenize_strategy(is_sd, is_sdxl, is_flux, args)
 
-    # データセットを準備する
+    # Prepare dataset first
     use_user_config = args.dataset_config is not None
     if args.dataset_class is None:
         blueprint_generator = BlueprintGenerator(ConfigSanitizer(True, True, args.masked_loss, True))
         if use_user_config:
             logger.info(f"Loading dataset config from {args.dataset_config}")
             user_config = config_util.load_user_config(args.dataset_config)
-            ignored = ["train_data_dir", "reg_data_dir", "in_json"]
-            if any(getattr(args, attr) is not None for attr in ignored):
-                logger.warning(
-                    "ignoring the following options because config file is found: {0} / 設定ファイルが利用されるため以下のオプションは無視されます: {0}".format(
-                        ", ".join(ignored)
-                    )
-                )
         else:
             if use_dreambooth_method:
                 logger.info("Using DreamBooth method.")
-                user_config = {
-                    "datasets": [
-                        {
-                            "subsets": config_util.generate_dreambooth_subsets_config_by_subdirs(
-                                args.train_data_dir, args.reg_data_dir
-                            )
-                        }
-                    ]
-                }
+                user_config = {"datasets": [{"subsets": config_util.generate_dreambooth_subsets_config_by_subdirs(args.train_data_dir, args.reg_data_dir)}]}
             else:
                 logger.info("Training with captions.")
-                user_config = {
-                    "datasets": [
-                        {
-                            "subsets": [
-                                {
-                                    "image_dir": args.train_data_dir,
-                                    "metadata_file": args.in_json,
-                                }
-                            ]
-                        }
-                    ]
-                }
-
+                user_config = {"datasets": [{"subsets": [{"image_dir": args.train_data_dir, "metadata_file": args.in_json}]}]}
         blueprint = blueprint_generator.generate(user_config, args)
-        train_dataset_group, val_dataset_group = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
+        train_dataset_group, _ = config_util.generate_dataset_group_by_blueprint(blueprint.dataset_group)
     else:
-        # use arbitrary dataset class
         train_dataset_group = train_util.load_arbitrary_dataset(args)
-        val_dataset_group = None
 
-    # acceleratorを準備する
-    logger.info("prepare accelerator")
+    # Prepare dtypes - use bf16 for efficiency
+    weight_dtype, _ = train_util.prepare_dtype(args)
+    t5xxl_dtype = utils.str_to_dtype(args.t5xxl_dtype, weight_dtype) if args.t5xxl_dtype else weight_dtype
+
+    logger.info("Loading models with device_map for low VRAM...")
+    # Build a minimal accelerator for model loading and caching (no DeepSpeed)
     args.deepspeed = False
     accelerator = train_util.prepare_accelerator(args)
 
-    # mixed precisionに対応した型を用意しておき適宜castする
-    weight_dtype, _ = train_util.prepare_dtype(args)
-    t5xxl_dtype = utils.str_to_dtype(args.t5xxl_dtype, weight_dtype)
-
-    # モデルを読み込む
-    logger.info("load model")
     if is_sdxl:
-        _, text_encoder1, text_encoder2, _, _, _, _ = sdxl_train_util.load_target_model(
-            args, accelerator, sdxl_model_util.MODEL_VERSION_SDXL_BASE_V1_0, weight_dtype
+        # Load SDXL text encoders with minimal GPU usage; allow caching only TE2 if desired
+        _, text_encoder1, text_encoder2, _, _, _, _ = sdxl_train_util.load_target_model(args, accelerator, "sdxl", weight_dtype)
+        cache_te2_only = getattr(args, "cache_te2_only", False)
+        # Move only necessary encoders to GPU to avoid OOM on small VRAM GPUs
+        if not cache_te2_only:
+            text_encoder1.to("cuda", dtype=weight_dtype)
+        text_encoder2.to("cuda", dtype=weight_dtype)
+        text_encoders = [text_encoder1 if not cache_te2_only else None, text_encoder2]
+    else:  # is_flux
+        from transformers import CLIPTextModel, T5EncoderModel
+        from safetensors.torch import load_file
+
+        clip_l = None
+        if not cache_t5_only:
+            # Load CLIP-L to GPU (fits in 6GB)
+            logger.info("Loading CLIP-L to GPU...")
+            clip_l = flux_utils.load_clip_l(
+                args.clip_l, weight_dtype, "cpu", disable_mmap=args.disable_mmap_load_safetensors
+            )
+            clip_l.to("cuda", dtype=weight_dtype)
+
+        # Load T5XXL with device_map to automatically shard across CPU and GPU
+        logger.info("Loading T5XXL with device_map='auto' (will shard across CPU and GPU)...")
+        import json
+        from transformers import T5Config
+
+        T5_CONFIG_JSON = '''
+{
+  "architectures": ["T5EncoderModel"],
+  "classifier_dropout": 0.0,
+  "d_ff": 10240,
+  "d_kv": 64,
+  "d_model": 4096,
+  "decoder_start_token_id": 0,
+  "dense_act_fn": "gelu_new",
+  "dropout_rate": 0.1,
+  "eos_token_id": 1,
+  "feed_forward_proj": "gated-gelu",
+  "initializer_factor": 1.0,
+  "is_encoder_decoder": true,
+  "is_gated_act": true,
+  "layer_norm_epsilon": 1e-06,
+  "model_type": "t5",
+  "num_decoder_layers": 24,
+  "num_heads": 64,
+  "num_layers": 24,
+  "output_past": true,
+  "pad_token_id": 0,
+  "relative_attention_max_distance": 128,
+  "relative_attention_num_buckets": 32,
+  "tie_word_embeddings": false,
+  "torch_dtype": "float16",
+  "transformers_version": "4.41.2",
+  "use_cache": true,
+  "vocab_size": 32128
+}
+'''
+        config = json.loads(T5_CONFIG_JSON)
+        config = T5Config(**config)
+
+        # Load T5XXL with device_map - this will automatically shard
+        t5xxl = T5EncoderModel.from_pretrained(
+            None,
+            config=config,
+            state_dict=load_file(args.t5xxl),
+            device_map="auto",
+            torch_dtype=t5xxl_dtype,
         )
-        text_encoder1.to(accelerator.device, weight_dtype)
-        text_encoder2.to(accelerator.device, weight_dtype)
-        text_encoders = [text_encoder1, text_encoder2]
-    else:
-        clip_l = flux_utils.load_clip_l(
-            args.clip_l, weight_dtype, accelerator.device, disable_mmap=args.disable_mmap_load_safetensors
-        )
 
-        t5xxl = flux_utils.load_t5xxl(args.t5xxl, None, accelerator.device, disable_mmap=args.disable_mmap_load_safetensors)
-
-        if t5xxl.dtype == torch.float8_e4m3fnuz or t5xxl.dtype == torch.float8_e5m2 or t5xxl.dtype == torch.float8_e5m2fnuz:
-            raise ValueError(f"Unsupported fp8 model dtype: {t5xxl.dtype}")
-        elif t5xxl.dtype == torch.float8_e4m3fn:
-            logger.info("Loaded fp8 T5XXL model")
-
-        if t5xxl_dtype != t5xxl_dtype:
-            if t5xxl.dtype == torch.float8_e4m3fn and t5xxl_dtype.itemsize() >= 2:
-                logger.warning(
-                    "The loaded model is fp8, but the specified T5XXL dtype is larger than fp8.  This may cause a performance drop."
-                    " / ロードされたモデルはfp8ですが、指定されたT5XXLのdtypeがfp8より高精度です。精度低下が発生する可能性があります。"
-                )
-            logger.info(f"Casting T5XXL model to {t5xxl_dtype}")
-            t5xxl.to(t5xxl_dtype)
-
-        text_encoders = [clip_l, t5xxl]
+        if cache_t5_only:
+            text_encoders = [None, t5xxl]
+        else:
+            text_encoders = [clip_l, t5xxl]
 
     for text_encoder in text_encoders:
-        text_encoder.requires_grad_(False)
-        text_encoder.eval()
+        if text_encoder is not None:
+            text_encoder.requires_grad_(False)
+            text_encoder.eval()
 
-    # build text encoder outputs caching strategy
+    # Build strategies
     if is_sdxl:
         text_encoder_outputs_caching_strategy = strategy_sdxl.SdxlTextEncoderOutputsCachingStrategy(
-            args.cache_text_encoder_outputs_to_disk, None, args.skip_cache_check, is_weighted=args.weighted_captions
+            True, None, args.skip_cache_check, is_weighted=args.weighted_captions, cache_te2_only=getattr(args, "cache_te2_only", False)
         )
-    else:
-        text_encoder_outputs_caching_strategy = strategy_flux.FluxTextEncoderOutputsCachingStrategy(
-            args.cache_text_encoder_outputs_to_disk,
-            args.text_encoder_batch_size,
-            args.skip_cache_check,
-            is_partial=False,
-            apply_t5_attn_mask=args.apply_t5_attn_mask,
-        )
-    strategy_base.TextEncoderOutputsCachingStrategy.set_strategy(text_encoder_outputs_caching_strategy)
-
-    # build text encoding strategy
-    if is_sdxl:
         text_encoding_strategy = strategy_sdxl.SdxlTextEncodingStrategy()
-    else:
+    else: # is_flux
+        text_encoder_outputs_caching_strategy = strategy_flux.FluxTextEncoderOutputsCachingStrategy(True, args.text_encoder_batch_size, args.skip_cache_check, is_partial=cache_t5_only, apply_t5_attn_mask=args.apply_t5_attn_mask)
         text_encoding_strategy = strategy_flux.FluxTextEncodingStrategy(args.apply_t5_attn_mask)
+
+    strategy_base.TextEncoderOutputsCachingStrategy.set_strategy(text_encoder_outputs_caching_strategy)
     strategy_base.TextEncodingStrategy.set_strategy(text_encoding_strategy)
 
-    # cache text encoder outputs
+    # Create a simple accelerator that reports GPU as device
+    class SimpleAccelerator:
+        def __init__(self):
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.num_processes = 1
+            self.process_index = 0
+            self.is_main_process = True
+            self.is_local_main_process = True
+
+        def wait_for_everyone(self):
+            pass
+
+        def print(self, msg):
+            logger.info(msg)
+
+        def autocast(self):
+            # Return a no-op context manager
+            import contextlib
+            return contextlib.nullcontext()
+
+    logger.info("Starting caching process with device_map sharding...")
     train_dataset_group.new_cache_text_encoder_outputs(text_encoders, accelerator)
 
-    accelerator.wait_for_everyone()
-    accelerator.print(f"Finished caching text encoder outputs to disk.")
+    logger.info(f"Finished caching text encoder outputs to disk.")
 
 
 def setup_parser() -> argparse.ArgumentParser:
@@ -199,6 +227,16 @@ def setup_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--sdxl", action="store_true", help="Use SDXL model / SDXLモデルを使用する")
     parser.add_argument("--flux", action="store_true", help="Use FLUX model / FLUXモデルを使用する")
+    parser.add_argument(
+        "--cache_t5_only",
+        action="store_true",
+        help="For FLUX, cache only T5XXL outputs",
+    )
+    parser.add_argument(
+        "--cache_te2_only",
+        action="store_true",
+        help="For SDXL, cache only CLIP_G outputs",
+    )
     parser.add_argument(
         "--t5xxl_dtype",
         type=str,

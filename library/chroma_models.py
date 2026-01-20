@@ -324,7 +324,11 @@ class DoubleStreamBlock(nn.Module):
         txt_seq_len: Tensor,
     ) -> tuple[Tensor, Tensor]:
         if self.training and self.gradient_checkpointing:
-            return ckpt.checkpoint(self._forward, img, txt, pe, distill_vec, txt_seq_len, use_reentrant=False)
+            try:
+                import deepspeed
+                return deepspeed.checkpointing.checkpoint(self._forward, img, txt, pe, distill_vec, txt_seq_len)
+            except ImportError:
+                return ckpt.checkpoint(self._forward, img, txt, pe, distill_vec, txt_seq_len, use_reentrant=False)
         else:
             return self._forward(img, txt, pe, distill_vec, txt_seq_len)
 
@@ -428,7 +432,11 @@ class SingleStreamBlock(nn.Module):
 
     def forward(self, x: Tensor, pe: Tensor, distill_vec: list[ModulationOut], txt_seq_len: Tensor) -> Tensor:
         if self.training and self.gradient_checkpointing:
-            return ckpt.checkpoint(self._forward, x, pe, distill_vec, txt_seq_len, use_reentrant=False)
+            try:
+                import deepspeed
+                return deepspeed.checkpointing.checkpoint(self._forward, x, pe, distill_vec, txt_seq_len)
+            except ImportError:
+                return ckpt.checkpoint(self._forward, x, pe, distill_vec, txt_seq_len, use_reentrant=False)
         else:
             return self._forward(x, pe, distill_vec, txt_seq_len)
 
@@ -653,12 +661,15 @@ class Chroma(Flux):
         modulation_index = timestep_embedding(self.mod_index, self.approximator_in_dim // 2)
         # we need to broadcast the modulation index here so each batch has all of the index
         modulation_index = modulation_index.unsqueeze(0).repeat(batch_size, 1, 1)
+        # move to the same device as timesteps
+        modulation_index = modulation_index.to(timesteps.device)
         # and we need to broadcast timestep and guidance along too
         timestep_guidance = torch.cat([distill_timestep, distil_guidance], dim=1).unsqueeze(1).repeat(1, self.mod_index_length, 1)
         # then and only then we could concatenate it together
         input_vec = torch.cat([timestep_guidance, modulation_index], dim=-1)
 
-        mod_vectors = self.distilled_guidance_layer(input_vec)
+        # ensure input_vec is the same dtype as the model
+        mod_vectors = self.distilled_guidance_layer(input_vec.to(self.distilled_guidance_layer.device, dtype=self.distilled_guidance_layer.in_proj.weight.dtype))
         return mod_vectors
 
     def forward(

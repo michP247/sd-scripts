@@ -114,7 +114,11 @@ class LoRAModule(torch.nn.Module):
             # maskから計算することも考えられるが、augmentation的な効果を期待してrank_dropoutを用いる
             scale = self.scale * (1.0 / (1.0 - self.rank_dropout))  # redundant for readability
         else:
+            # Apply alpha scaling only during training, not during inference
+            #if self.training:
             scale = self.scale
+            #else:
+            #    scale = 1.0
 
         lx = self.lora_up(lx)
 

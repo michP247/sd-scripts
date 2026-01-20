@@ -563,7 +563,11 @@ class MLPEmbedder(nn.Module):
 
     def forward(self, *args, **kwargs):
         if self.training and self.gradient_checkpointing:
-            return checkpoint(self._forward, *args, use_reentrant=False, **kwargs)
+            try:
+                import deepspeed
+                return deepspeed.checkpointing.checkpoint(self._forward, *args, **kwargs)
+            except ImportError:
+                return checkpoint(self._forward, *args, use_reentrant=False, **kwargs)
         else:
             return self._forward(*args, **kwargs)
 
@@ -740,7 +744,11 @@ class DoubleStreamBlock(nn.Module):
     ) -> tuple[Tensor, Tensor]:
         if self.training and self.gradient_checkpointing:
             if not self.cpu_offload_checkpointing:
-                return checkpoint(self._forward, img, txt, vec, pe, txt_attention_mask, use_reentrant=False)
+                try:
+                    import deepspeed
+                    return deepspeed.checkpointing.checkpoint(self._forward, img, txt, vec, pe, txt_attention_mask)
+                except ImportError:
+                    return checkpoint(self._forward, img, txt, vec, pe, txt_attention_mask, use_reentrant=False)
             # cpu offload checkpointing
 
             def create_custom_forward(func):
@@ -839,7 +847,11 @@ class SingleStreamBlock(nn.Module):
     def forward(self, x: Tensor, vec: Tensor, pe: Tensor, txt_attention_mask: Optional[Tensor] = None) -> Tensor:
         if self.training and self.gradient_checkpointing:
             if not self.cpu_offload_checkpointing:
-                return checkpoint(self._forward, x, vec, pe, txt_attention_mask, use_reentrant=False)
+                try:
+                    import deepspeed
+                    return deepspeed.checkpointing.checkpoint(self._forward, x, vec, pe, txt_attention_mask)
+                except ImportError:
+                    return checkpoint(self._forward, x, vec, pe, txt_attention_mask, use_reentrant=False)
 
             # cpu offload checkpointing
 

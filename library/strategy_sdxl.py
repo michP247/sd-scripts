@@ -229,8 +229,10 @@ class SdxlTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
         skip_disk_cache_validity_check: bool,
         is_partial: bool = False,
         is_weighted: bool = False,
+        cache_te2_only: bool = False,
     ) -> None:
         super().__init__(cache_to_disk, batch_size, skip_disk_cache_validity_check, is_partial, is_weighted)
+        self.cache_te2_only = cache_te2_only
 
     def get_outputs_npz_path(self, image_abs_path: str) -> str:
         return os.path.splitext(image_abs_path)[0] + SdxlTextEncoderOutputsCachingStrategy.SDXL_TEXT_ENCODER_OUTPUTS_NPZ_SUFFIX
@@ -258,6 +260,15 @@ class SdxlTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
         hidden_state1 = data["hidden_state1"]
         hidden_state2 = data["hidden_state2"]
         pool2 = data["pool2"]
+        
+        # Check if this is a TE2-only cache
+        te2_only = data.get("te2_only", False)
+        
+        if te2_only:
+            # For TE2-only cache, we need to handle the first text encoder differently
+            # hidden_state1 will be zeros, which is fine since we're not training TE1
+            pass
+        
         return [hidden_state1, hidden_state2, pool2]
 
     def cache_batch_outputs(
@@ -265,7 +276,7 @@ class SdxlTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
     ):
         sdxl_text_encoding_strategy = text_encoding_strategy  # type: SdxlTextEncodingStrategy
         captions = [info.caption for info in infos]
-
+        
         if self.is_weighted:
             tokens_list, weights_list = tokenize_strategy.tokenize_with_weights(captions)
             with torch.no_grad():
@@ -275,9 +286,46 @@ class SdxlTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
         else:
             tokens1, tokens2 = tokenize_strategy.tokenize(captions)
             with torch.no_grad():
-                hidden_state1, hidden_state2, pool2 = sdxl_text_encoding_strategy.encode_tokens(
-                    tokenize_strategy, models, [tokens1, tokens2]
-                )
+                # If cache_te2_only is True, only cache the second text encoder (TE2)
+                if self.cache_te2_only:
+                    # Only encode with the second text encoder
+                    # Create dummy tensors for the first text encoder
+                    batch_size = len(captions)
+                    hidden_state1 = torch.zeros(batch_size, 77, 768, dtype=torch.float32)
+                    
+                    # Get the actual second text encoder and unwrapped version if available
+                    if len(models) == 2:
+                        _, text_encoder2 = models
+                        unwrapped_text_encoder2 = None
+                    else:
+                        _, text_encoder2, unwrapped_text_encoder2 = models
+                    
+                    # Directly encode with the second text encoder using the internal method
+                    # This avoids the need for a dummy text encoder
+                    input_ids2 = tokens2.reshape((-1, 77))  # batch_size*n, 77
+                    input_ids2 = input_ids2.to(text_encoder2.device)
+                    
+                    # text_encoder2
+                    enc_out = text_encoder2(input_ids2, output_hidden_states=True, return_dict=True)
+                    hidden_states2 = enc_out["hidden_states"][-2]  # penuultimate layer
+                    
+                    # pool2
+                    unwrapped_te2 = unwrapped_text_encoder2 or text_encoder2
+                    pool2 = sdxl_text_encoding_strategy._pool_workaround(
+                        unwrapped_te2, enc_out["last_hidden_state"], input_ids2, 0  # tokenizer2.eos_token_id
+                    )
+                    
+                    # Reshape to match expected format
+                    b_size = batch_size
+                    hidden_states2 = hidden_states2.reshape((b_size, -1, hidden_states2.shape[-1]))
+                    pool2 = pool2[::1]  # n_size is 1 in this case
+                    
+                    hidden_state2 = hidden_states2
+                else:
+                    # Encode with both text encoders (default behavior)
+                    hidden_state1, hidden_state2, pool2 = sdxl_text_encoding_strategy.encode_tokens(
+                        tokenize_strategy, models, [tokens1, tokens2]
+                    )
 
         if hidden_state1.dtype == torch.bfloat16:
             hidden_state1 = hidden_state1.float()
@@ -296,11 +344,22 @@ class SdxlTextEncoderOutputsCachingStrategy(TextEncoderOutputsCachingStrategy):
             pool2_i = pool2[i]
 
             if self.cache_to_disk:
-                np.savez(
-                    info.text_encoder_outputs_npz,
-                    hidden_state1=hidden_state1_i,
-                    hidden_state2=hidden_state2_i,
-                    pool2=pool2_i,
-                )
+                if self.cache_te2_only:
+                    # Only cache the second text encoder outputs
+                    np.savez(
+                        info.text_encoder_outputs_npz,
+                        hidden_state1=hidden_state1_i,  # Still include for compatibility
+                        hidden_state2=hidden_state2_i,
+                        pool2=pool2_i,
+                        te2_only=True,  # Flag to indicate only TE2 is cached
+                    )
+                else:
+                    # Cache both text encoders
+                    np.savez(
+                        info.text_encoder_outputs_npz,
+                        hidden_state1=hidden_state1_i,
+                        hidden_state2=hidden_state2_i,
+                        pool2=pool2_i,
+                    )
             else:
                 info.text_encoder_outputs = [hidden_state1_i, hidden_state2_i, pool2_i]

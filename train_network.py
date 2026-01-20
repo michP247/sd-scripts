@@ -1,6 +1,7 @@
 import gc
 import importlib
 import argparse
+import numpy as np
 import math
 import os
 import typing
@@ -21,7 +22,7 @@ from library.device_utils import init_ipex, clean_memory_on_device
 
 init_ipex()
 
-from accelerate.utils import set_seed
+from accelerate.utils import set_seed, DummyOptim
 from accelerate import Accelerator
 from diffusers import DDPMScheduler
 from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
@@ -87,7 +88,7 @@ class NetworkTrainer:
 
         lrs = lr_scheduler.get_last_lr()
         for i, lr in enumerate(lrs):
-            if lr_descriptions is not None:
+            if lr_descriptions is not None and i < len(lr_descriptions):
                 lr_desc = lr_descriptions[i]
             else:
                 idx = i - (0 if args.network_train_unet_only else -1)
@@ -365,6 +366,9 @@ class NetworkTrainer:
     def on_validation_step_end(self, args, accelerator, network, text_encoders, unet, batch, weight_dtype):
         pass
 
+    def post_accelerator_prepare_hook(self, args, accelerator, training_model):
+        pass
+
     # endregion
 
     def process_batch(
@@ -413,41 +417,45 @@ class NetworkTrainer:
 
             latents = self.shift_scale_latents(args, latents)
 
-        text_encoder_conds = []
-        text_encoder_outputs_list = batch.get("text_encoder_outputs_list", None)
-        if text_encoder_outputs_list is not None:
-            text_encoder_conds = text_encoder_outputs_list  # List of text encoder outputs
-
-        if len(text_encoder_conds) == 0 or text_encoder_conds[0] is None or train_text_encoder:
-            # TODO this does not work if 'some text_encoders are trained' and 'some are not and not cached'
-            with torch.set_grad_enabled(is_train and train_text_encoder), accelerator.autocast():
-                # Get the text embedding for conditioning
-                if args.weighted_captions:
-                    input_ids_list, weights_list = tokenize_strategy.tokenize_with_weights(batch["captions"])
-                    encoded_text_encoder_conds = text_encoding_strategy.encode_tokens_with_weights(
-                        tokenize_strategy,
-                        self.get_models_for_text_encoding(args, accelerator, text_encoders),
-                        input_ids_list,
-                        weights_list,
-                    )
-                else:
-                    input_ids = [ids.to(accelerator.device) for ids in batch["input_ids_list"]]
-                    encoded_text_encoder_conds = text_encoding_strategy.encode_tokens(
-                        tokenize_strategy,
-                        self.get_models_for_text_encoding(args, accelerator, text_encoders),
-                        input_ids,
-                    )
-                if args.full_fp16:
-                    encoded_text_encoder_conds = [c.to(weight_dtype) for c in encoded_text_encoder_conds]
-
-            # if text_encoder_conds is not cached, use encoded_text_encoder_conds
-            if len(text_encoder_conds) == 0:
-                text_encoder_conds = encoded_text_encoder_conds
+        # text encoder
+        with torch.set_grad_enabled(is_train and train_text_encoder):
+            # Initialize tokens_list to avoid UnboundLocalError
+            tokens_list = []
+            
+            # Get the text conditioning
+            if batch.get("text_encoder_outputs_list") is not None:
+                # use cached text encoder outputs
+                text_encoder_conds = batch["text_encoder_outputs_list"]
+                # But if we are training the text encoder, we need to re-encode the text
+                if train_text_encoder:
+                    raw_input_ids = batch.get("input_ids_list")
+                    if raw_input_ids is None:
+                        # If input_ids are not available, we can't re-encode text
+                        # This happens when using cached text encoder outputs
+                        # In this case, we'll use cached outputs
+                        pass
+                    else:
+                        if isinstance(raw_input_ids, list):
+                            tokens_list = [raw_input_ids[0].to(accelerator.device), raw_input_ids[1].to(accelerator.device)]
+                        else:
+                            tokens_list = [raw_input_ids["input_ids"].to(accelerator.device), raw_input_ids["input_ids2"].to(accelerator.device)]
+                        models_for_encoding = self.get_models_for_text_encoding(args, accelerator, text_encoders)
+                        encoded_text_encoder_conds = text_encoding_strategy.encode_tokens(
+                            tokenize_strategy, models_for_encoding, tokens_list
+                        )
+                        text_encoder_conds = encoded_text_encoder_conds
             else:
-                # if encoded_text_encoder_conds is not None, update cached text_encoder_conds
-                for i in range(len(encoded_text_encoder_conds)):
-                    if encoded_text_encoder_conds[i] is not None:
-                        text_encoder_conds[i] = encoded_text_encoder_conds[i]
+                # encode text encoder outputs
+                raw_input_ids = batch["input_ids_list"]
+                if isinstance(raw_input_ids, list):
+                    tokens_list = [raw_input_ids[0].to(accelerator.device), raw_input_ids[1].to(accelerator.device)]
+                else:
+                    tokens_list = [raw_input_ids["input_ids"].to(accelerator.device), raw_input_ids["input_ids2"].to(accelerator.device)]
+                models_for_encoding = self.get_models_for_text_encoding(args, accelerator, text_encoders)
+                encoded_text_encoder_conds = text_encoding_strategy.encode_tokens(
+                    tokenize_strategy, models_for_encoding, tokens_list
+                )
+                text_encoder_conds = encoded_text_encoder_conds
 
         # sample noise, call unet, get target
         noise_pred, target, timesteps, weighting = self.get_noise_pred_and_target(
@@ -668,23 +676,9 @@ class NetworkTrainer:
                 net_kwargs[key] = value
 
         # if a new network is added in future, add if ~ then blocks for each network (;'∀')
-        if args.dim_from_weights:
-            network, _ = network_module.create_network_from_weights(1, args.network_weights, vae, text_encoder, unet, **net_kwargs)
-        else:
-            if "dropout" not in net_kwargs:
-                # workaround for LyCORIS (;^ω^)
-                net_kwargs["dropout"] = args.network_dropout
-
-            network = network_module.create_network(
-                1.0,
-                args.network_dim,
-                args.network_alpha,
-                vae,
-                text_encoder,
-                unet,
-                neuron_dropout=args.network_dropout,
-                **net_kwargs,
-            )
+        network = network_module.create_network(
+            1.0, args.network_dim, args.network_alpha, vae, text_encoder, unet, neuron_dropout=args.network_dropout, **net_kwargs
+        )
         if network is None:
             return
         network_has_multiplier = hasattr(network, "set_multiplier")
@@ -708,6 +702,8 @@ class NetworkTrainer:
         train_text_encoder = self.is_train_text_encoder(args)
         network.apply_to(text_encoder, unet, train_text_encoder, train_unet)
 
+        #self.post_process_network(args, accelerator, network, text_encoders, unet)
+
         if args.network_weights is not None:
             # FIXME consider alpha of weights: this assumes that the alpha is not changed
             info = network.load_weights(args.network_weights)
@@ -720,7 +716,7 @@ class NetworkTrainer:
                 unet.enable_gradient_checkpointing()
 
             for t_enc, flag in zip(text_encoders, self.get_text_encoders_train_flags(args, text_encoders)):
-                if flag:
+                if flag and t_enc is not None:
                     if t_enc.supports_gradient_checkpointing:
                         t_enc.gradient_checkpointing_enable()
             del t_enc
@@ -764,8 +760,15 @@ class NetworkTrainer:
         #             v = len(v)
         #         accelerator.print(f"trainable_params: {k} = {v}")
 
+        # Create optimizer - may be replaced by DummyOptim if optimizer is in DeepSpeed config
         optimizer_name, optimizer_args, optimizer = train_util.get_optimizer(args, trainable_params)
         optimizer_train_fn, optimizer_eval_fn = train_util.get_optimizer_train_eval_fn(optimizer, args)
+
+        # For DeepSpeed: Check if optimizer is defined in config, if so use DummyOptim
+        if args.deepspeed and hasattr(accelerator.state, "deepspeed_plugin") and accelerator.state.deepspeed_plugin is not None:
+            if "optimizer" in accelerator.state.deepspeed_plugin.deepspeed_config:
+                accelerator.print("DeepSpeed optimizer found in config - using DummyOptim")
+                optimizer = DummyOptim(trainable_params, lr=args.learning_rate)
 
         # prepare dataloader
         # strategies are set here because they cannot be referenced in another process. Copy them with the dataset
@@ -807,8 +810,25 @@ class NetworkTrainer:
         # データセット側にも学習ステップを送信
         train_dataset_group.set_max_train_steps(args.max_train_steps)
 
+        # Update DeepSpeed config if max_train_steps has changed (e.g. due to epochs)
+        if args.deepspeed and hasattr(accelerator.state, "deepspeed_plugin") and accelerator.state.deepspeed_plugin is not None:
+            ds_plugin = accelerator.state.deepspeed_plugin
+            ds_config = ds_plugin.deepspeed_config
+            if "scheduler" in ds_config:
+                scheduler_params = ds_config["scheduler"].get("params", {})
+                if "total_num_steps" in scheduler_params:
+                    scheduler_params["total_num_steps"] = args.max_train_steps
+                
+                # Recalculate warmup steps if it was a ratio
+                if hasattr(args, 'lr_warmup_steps') and isinstance(args.lr_warmup_steps, float):
+                     scheduler_params["warmup_num_steps"] = int(args.lr_warmup_steps * args.max_train_steps)
+
         # lr schedulerを用意する
-        lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
+        """ if args.deepspeed:
+            # DummyScheduler for DeepSpeed - DeepSpeed will create the real scheduler from config
+            lr_scheduler = DummyScheduler(optimizer, total_num_steps=args.max_train_steps, warmup_num_steps=args.lr_warmup_steps)
+        else:
+            lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes) """
 
         # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
         if args.full_fp16:
@@ -850,30 +870,59 @@ class NetworkTrainer:
         if self.cast_unet(args):
             unet.to(dtype=unet_weight_dtype)
         for i, t_enc in enumerate(text_encoders):
-            t_enc.requires_grad_(False)
+            if t_enc is not None:
+                t_enc.requires_grad_(False)
 
-            # in case of cpu, dtype is already set to fp32 because cpu does not support fp8/fp16/bf16
-            if t_enc.device.type != "cpu" and self.cast_text_encoder(args):
-                t_enc.to(dtype=te_weight_dtype)
+                # in case of cpu, dtype is already set to fp32 because cpu does not support fp8/fp16/bf16
+                if t_enc.device.type != "cpu" and self.cast_text_encoder(args):
+                    t_enc.to(dtype=te_weight_dtype)
 
-                # nn.Embedding not support FP8
-                if te_weight_dtype != weight_dtype:
-                    self.prepare_text_encoder_fp8(i, t_enc, te_weight_dtype, weight_dtype)
+                    # nn.Embedding not support FP8
+                    if te_weight_dtype != weight_dtype:
+                        self.prepare_text_encoder_fp8(i, t_enc, te_weight_dtype, weight_dtype)
 
         # acceleratorがなんかよろしくやってくれるらしい / accelerator will do something good
         if args.deepspeed:
+            # DeepSpeed's Zero-3 requires models to be handled differently.
+            # We wrap all trainable models into a single module.
             flags = self.get_text_encoders_train_flags(args, text_encoders)
             ds_model = deepspeed_utils.prepare_deepspeed_model(
                 args,
                 unet=unet if train_unet else None,
-                text_encoder1=text_encoders[0] if flags[0] else None,
-                text_encoder2=(text_encoders[1] if flags[1] else None) if len(text_encoders) > 1 else None,
+                text_encoder1=text_encoders[0] if len(text_encoders) > 0 and flags[0] else None,
+                text_encoder2=(text_encoders[1] if len(text_encoders) > 1 and flags[1] else None) if len(text_encoders) > 1 else None,
                 network=network,
             )
-            ds_model, optimizer, train_dataloader, val_dataloader, lr_scheduler = accelerator.prepare(
-                ds_model, optimizer, train_dataloader, val_dataloader, lr_scheduler
+            
+            # Step 1: Prepare model, optimizer, and dataloaders with DeepSpeed.
+            # The scheduler is omitted here to get the real optimizer back from DeepSpeed.
+            accelerator.print("Preparing model, optimizer, and dataloaders with DeepSpeed...")
+            ds_model, optimizer, train_dataloader, val_dataloader = accelerator.prepare(
+                ds_model, optimizer, train_dataloader, val_dataloader
             )
+            
+            # Step 2: Now that `optimizer` is the real DeepSpeed optimizer, create our learning rate scheduler.
+            #accelerator.print("Creating new scheduler with the real DeepSpeed optimizer.")
+            # DummyScheduler for DeepSpeed - DeepSpeed will create the real scheduler from config
+            #accelerator.print("Creating DummyScheduler for DeepSpeed...")
+            #lr_scheduler = train_util.get_dummy_scheduler(optimizer)
+            lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
+            
+            # Step 3: Prepare the scheduler separately. Accelerator will now wrap it correctly.
+            accelerator.print("Preparing scheduler...")
+            lr_scheduler = accelerator.prepare(lr_scheduler)
+
             training_model = ds_model
+
+            # After prepare, the original text_encoders are stale. Update them from the prepared model.
+            unwrapped_model = accelerator.unwrap_model(training_model)
+            if hasattr(unwrapped_model, "text_encoder1") and unwrapped_model.text_encoder1 is not None:
+                text_encoders[0] = unwrapped_model.text_encoder1
+            if len(text_encoders) > 1 and hasattr(unwrapped_model, "text_encoder2") and unwrapped_model.text_encoder2 is not None:
+                text_encoders[1] = unwrapped_model.text_encoder2
+            # Also refresh `network` reference from the prepared DeepSpeed container if present
+            if hasattr(unwrapped_model, "network") and unwrapped_model.network is not None:
+                network = unwrapped_model.network
         else:
             if train_unet:
                 # default implementation is:  unet = accelerator.prepare(unet)
@@ -898,20 +947,25 @@ class NetworkTrainer:
             )
             training_model = network
 
+        # call hook for post accelerator preparation
+        self.post_accelerator_prepare_hook(args, accelerator, training_model)
+
         if args.gradient_checkpointing:
             # according to TI example in Diffusers, train is required
             unet.train()
             for i, (t_enc, frag) in enumerate(zip(text_encoders, self.get_text_encoders_train_flags(args, text_encoders))):
-                t_enc.train()
+                if t_enc is not None:
+                    t_enc.train()
 
-                # set top parameter requires_grad = True for gradient checkpointing works
-                if frag:
-                    self.prepare_text_encoder_grad_ckpt_workaround(i, t_enc)
+                    # set top parameter requires_grad = True for gradient checkpointing works
+                    if frag:
+                        self.prepare_text_encoder_grad_ckpt_workaround(i, t_enc)
 
         else:
             unet.eval()
             for t_enc in text_encoders:
-                t_enc.eval()
+                if t_enc is not None:
+                    t_enc.eval()
 
         del t_enc
 
@@ -1306,7 +1360,68 @@ class NetworkTrainer:
             sai_metadata = self.get_sai_model_spec(args)
             metadata_to_save.update(sai_metadata)
 
-            unwrapped_nw.save_weights(ckpt_file, save_dtype, metadata_to_save)
+            # Check if DeepSpeed ZeRO Stage 3 is enabled
+            is_deepspeed_zero3 = (
+                args.deepspeed
+                and hasattr(accelerator.state, "deepspeed_plugin")
+                and accelerator.state.deepspeed_plugin is not None
+                and accelerator.state.deepspeed_plugin.zero_stage == 3
+            )
+
+            if is_deepspeed_zero3:
+                # For ZeRO Stage 3, we need to manually gather sharded parameters
+                import deepspeed
+                from safetensors.torch import save_file
+
+                accelerator.print("Gathering sharded parameters for ZeRO Stage 3 save...")
+
+                # DO NOT force re-initialization here. It is harmful because it creates new,
+                # untrained parameters, breaking the link to the optimizer.
+                # The network should be correctly initialized before training starts.
+
+                state_dict = {}
+
+                # Gather all network parameters
+                for name, param in unwrapped_nw.named_parameters():
+                    if not param.requires_grad:
+                        continue
+
+                    # Check if parameter is sharded
+                    if hasattr(param, "ds_id"):
+                        with deepspeed.zero.GatheredParameters(param, enabled=True):
+                            if accelerator.is_main_process:
+                                param_cpu = param.detach().cpu()
+                                if save_dtype is not None:
+                                    param_cpu = param_cpu.to(save_dtype)
+                                state_dict[name] = param_cpu
+                    else:
+                        # Parameter not sharded
+                        if accelerator.is_main_process:
+                            param_cpu = param.detach().cpu()
+                            if save_dtype is not None:
+                                param_cpu = param_cpu.to(save_dtype)
+                            state_dict[name] = param_cpu
+                
+                # Gather specific network buffers (like alpha)
+                if accelerator.is_main_process:
+                    for name, buf in unwrapped_nw.named_buffers():
+                        # Only save buffers that are explicitly part of the LoRA spec, like 'alpha'
+                        if name.endswith(".alpha"):
+                            buf_cpu = buf.detach().cpu()
+                            if save_dtype is not None:
+                                buf_cpu = buf_cpu.to(save_dtype)
+                            state_dict[name] = buf_cpu
+
+                # Only main process saves
+                if accelerator.is_main_process:
+                    accelerator.print(f"Saving {len(state_dict)} tensors to {ckpt_file}")
+                    save_file(state_dict, ckpt_file, metadata=metadata_to_save)
+
+                accelerator.wait_for_everyone()
+            else:
+                # Normal save path (non-ZeRO3 or non-DeepSpeed)
+                unwrapped_nw.save_weights(ckpt_file, save_dtype, metadata_to_save)
+
             if args.huggingface_repo_id is not None:
                 huggingface_util.upload(args, ckpt_file, "/" + ckpt_name, force_sync_upload=force_sync_upload)
 
@@ -1346,6 +1461,9 @@ class NetworkTrainer:
         # log device and dtype for each model
         logger.info(f"unet dtype: {unet_weight_dtype}, device: {unet.device}")
         for i, t_enc in enumerate(text_encoders):
+            if t_enc is None:
+                logger.info(f"text_encoder [{i}]: None (using cached outputs)")
+                continue
             params_itr = t_enc.parameters()
             params_itr.__next__()  # skip the first parameter
             params_itr.__next__()  # skip the second parameter. because CLIP first two parameters are embeddings
@@ -1412,6 +1530,7 @@ class NetworkTrainer:
                 skipped_dataloader = accelerator.skip_first_batches(train_dataloader, initial_step - 1)
                 initial_step = 1
 
+            current_loss_accum = 0.0
             for step, batch in enumerate(skipped_dataloader or train_dataloader):
                 current_step.value = global_step
                 if initial_step > 0:
@@ -1444,8 +1563,8 @@ class NetworkTrainer:
 
                     accelerator.backward(loss)
                     if accelerator.sync_gradients:
-                        self.all_reduce_network(accelerator, network)  # sync DDP grad manually
-                        if args.max_grad_norm != 0.0:
+                        #self.all_reduce_network(accelerator, network)  # sync DDP grad manually
+                        if args.max_grad_norm != 0.0 and not args.deepspeed:
                             params_to_clip = accelerator.unwrap_model(network).get_trainable_params()
                             accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
@@ -1482,10 +1601,36 @@ class NetworkTrainer:
                         mean_combined_norm = None
                         max_mean_logs = {}
 
+                current_loss = loss.detach().item()
+                current_loss_accum += current_loss
+                loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
+                avr_loss: float = loss_recorder.moving_average
+                logs = {"avr_loss": avr_loss}  # , "lr": lr_scheduler.get_last_lr()[0]}
+                progress_bar.set_postfix(**{**max_mean_logs, **logs})
+
                 # Checks if the accelerator has performed an optimization step behind the scenes
                 if accelerator.sync_gradients:
                     progress_bar.update(1)
                     global_step += 1
+
+                    if is_tracking:
+                        loss_for_log = current_loss_accum / args.gradient_accumulation_steps
+                        logs = self.generate_step_logs(
+                            args,
+                            loss_for_log,
+                            avr_loss,
+                            lr_scheduler,
+                            lr_descriptions,
+                            optimizer,
+                            keys_scaled,
+                            mean_norm,
+                            maximum_norm,
+                            mean_grad_norm,
+                            mean_combined_norm,
+                        )
+                        self.step_logging(accelerator, logs, global_step, epoch + 1)
+
+                    current_loss_accum = 0.0
 
                     optimizer_eval_fn()
                     self.sample_images(
@@ -1508,28 +1653,6 @@ class NetworkTrainer:
                                 remove_ckpt_name = train_util.get_step_ckpt_name(args, "." + args.save_model_as, remove_step_no)
                                 remove_model(remove_ckpt_name)
                     optimizer_train_fn()
-
-                current_loss = loss.detach().item()
-                loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
-                avr_loss: float = loss_recorder.moving_average
-                logs = {"avr_loss": avr_loss}  # , "lr": lr_scheduler.get_last_lr()[0]}
-                progress_bar.set_postfix(**{**max_mean_logs, **logs})
-
-                if is_tracking:
-                    logs = self.generate_step_logs(
-                        args,
-                        current_loss,
-                        avr_loss,
-                        lr_scheduler,
-                        lr_descriptions,
-                        optimizer,
-                        keys_scaled,
-                        mean_norm,
-                        maximum_norm,
-                        mean_grad_norm,
-                        mean_combined_norm,
-                    )
-                    self.step_logging(accelerator, logs, global_step, epoch + 1)
 
                 # VALIDATION PER STEP: global_step is already incremented
                 # for example, if validate_every_n_steps=100, validate at step 100, 200, 300, ...
@@ -1713,20 +1836,25 @@ class NetworkTrainer:
         # metadata["ss_epoch"] = str(num_train_epochs)
         metadata["ss_training_finished_at"] = str(time.time())
 
-        if is_main_process:
-            network = accelerator.unwrap_model(network)
-
-        accelerator.end_training()
+        # For DeepSpeed ZeRO Stage 3, we need to gather parameters before unwrapping
+        # Call end_training() first to ensure all processes are synchronized
         optimizer_eval_fn()
 
-        if is_main_process and (args.save_state or args.save_state_on_train_end):
-            train_util.save_state_on_train_end(args, accelerator)
-
+        # Save final model - unwrap after end_training for DeepSpeed compatibility
         if is_main_process:
+            # For DeepSpeed, accelerator.unwrap_model is called after end_training
+            # to ensure parameters are properly gathered
+            unwrapped_network = accelerator.unwrap_model(network)
+
+            if args.save_state or args.save_state_on_train_end:
+                train_util.save_state_on_train_end(args, accelerator)
+
             ckpt_name = train_util.get_last_ckpt_name(args, "." + args.save_model_as)
-            save_model(ckpt_name, network, global_step, num_train_epochs, force_sync_upload=True)
+            save_model(ckpt_name, unwrapped_network, global_step, num_train_epochs, force_sync_upload=True)
 
             logger.info("model saved.")
+
+        accelerator.end_training()
 
 
 def setup_parser() -> argparse.ArgumentParser:

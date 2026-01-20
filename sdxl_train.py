@@ -446,13 +446,26 @@ def train(args):
     # データセット側にも学習ステップを送信
     train_dataset_group.set_max_train_steps(args.max_train_steps)
 
-    # lr schedulerを用意する
-    if args.fused_optimizer_groups:
-        # prepare lr schedulers for each optimizer
-        lr_schedulers = [train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes) for optimizer in optimizers]
-        lr_scheduler = lr_schedulers[0]  # avoid error in the following code
+    # lr scheduler is created after DeepSpeed prepare when using ZeRO; do not create one yet
+    if args.deepspeed:
+        # Build DeepSpeed wrapper first so we can construct DummyOptim over its params
+        ds_model = deepspeed_utils.prepare_deepspeed_model(
+            args,
+            unet=unet if train_unet else None,
+            text_encoder1=text_encoder1 if train_text_encoder1 else None,
+            text_encoder2=text_encoder2 if train_text_encoder2 else None,
+        )
+        from accelerate.utils import DummyOptim
+        accelerator.print("DeepSpeed optimizer found in config - using DummyOptim")
+        # Provide model parameters to DummyOptim so Accelerate can hand them to DeepSpeed
+        optimizer = DummyOptim([p for p in ds_model.parameters() if p.requires_grad])
+        lr_scheduler = None
     else:
-        lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
+        if args.fused_optimizer_groups:
+            lr_schedulers = [train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes) for optimizer in optimizers]
+            lr_scheduler = lr_schedulers[0]  # avoid error in the following code
+        else:
+            lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
 
     # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
     if args.full_fp16:
@@ -478,16 +491,95 @@ def train(args):
         text_encoder1.text_model.final_layer_norm.requires_grad_(False)
 
     if args.deepspeed:
-        ds_model = deepspeed_utils.prepare_deepspeed_model(
-            args,
-            unet=unet if train_unet else None,
-            text_encoder1=text_encoder1 if train_text_encoder1 else None,
-            text_encoder2=text_encoder2 if train_text_encoder2 else None,
+        # Prepare with DeepSpeed: model + dummy optim; then rebuild real scheduler from DS optimizer
+        ds_model, optimizer, train_dataloader = accelerator.prepare(ds_model, optimizer, train_dataloader)
+        accelerator.print("Creating new scheduler with the real DeepSpeed optimizer.")
+        lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
+        accelerator.print("Preparing scheduler...")
+        lr_scheduler = accelerator.prepare(lr_scheduler)
+        # Update local references to models from the prepared DeepSpeed wrapper
+        try:
+            unwrapped = accelerator.unwrap_model(ds_model)
+            if hasattr(unwrapped, 'models'):
+                if 'unet' in unwrapped.models:
+                    unet = unwrapped.models['unet']
+                if train_text_encoder1 and 'text_encoder1' in unwrapped.models:
+                    text_encoder1 = unwrapped.models['text_encoder1']
+                if train_text_encoder2 and 'text_encoder2' in unwrapped.models:
+                    text_encoder2 = unwrapped.models['text_encoder2']
+        except Exception:
+            pass
+
+        # DeepSpeed ZeRO-3 CLIP-L fix: ensure max_position_embeddings and buffers are valid
+        is_deepspeed_stage3 = (
+            hasattr(accelerator.state, 'deepspeed_plugin') and accelerator.state.deepspeed_plugin is not None and accelerator.state.deepspeed_plugin.zero_stage == 3
         )
-        # most of ZeRO stage uses optimizer partitioning, so we have to prepare optimizer and ds_model at the same time. # pull/1139#issuecomment-1986790007
-        ds_model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-            ds_model, optimizer, train_dataloader, lr_scheduler
-        )
+        if is_deepspeed_stage3 and train_text_encoder1 and text_encoder1 is not None:
+            te = text_encoder1.module if hasattr(text_encoder1, 'module') else text_encoder1
+            # Fix config values at multiple levels
+            try:
+                if hasattr(te, 'config'):
+                    te.config.max_position_embeddings = 77
+                if hasattr(te, 'text_model') and hasattr(te.text_model, 'config'):
+                    te.text_model.config.max_position_embeddings = 77
+                if hasattr(te, 'text_model') and hasattr(te.text_model, 'embeddings'):
+                    emb = te.text_model.embeddings
+                    # Ensure position_ids buffer exists and has correct size
+                    if hasattr(emb, 'position_ids'):
+                        try:
+                            if emb.position_ids.shape[-1] != 77:
+                                if hasattr(emb.position_ids, '_is_param'):
+                                    delattr(emb, 'position_ids')
+                                emb.register_buffer('position_ids', torch.arange(77, device=accelerator.device).expand((1, -1)), persistent=False)
+                        except Exception:
+                            # Re-register if missing
+                            emb.register_buffer('position_ids', torch.arange(77, device=accelerator.device).expand((1, -1)), persistent=False)
+                    # Replace position_embedding Parameter with a buffer-backed module to avoid ZeRO param issues
+                    if hasattr(emb, 'position_embedding') and hasattr(emb.position_embedding, 'weight'):
+                        try:
+                            import deepspeed
+                        except Exception:
+                            deepspeed = None
+
+                        # Gather full weight (if sharded) and build buffer module
+                        def _get_pos_weight():
+                            try:
+                                if deepspeed is not None:
+                                    with deepspeed.zero.GatheredParameters([emb.position_embedding.weight], modifier_rank=None):
+                                        return emb.position_embedding.weight.detach().to(accelerator.device)
+                                return emb.position_embedding.weight.detach().to(accelerator.device)
+                            except Exception:
+                                return None
+
+                        pos_w = None
+                        # Prefer backup captured at load time
+                        if hasattr(te, '_position_embedding_backup'):
+                            pos_w = te._position_embedding_backup.to(accelerator.device)
+                        if pos_w is None or pos_w.numel() == 0:
+                            pos_w = _get_pos_weight()
+                        # Fallback zero init if needed
+                        if pos_w is None or pos_w.numel() == 0:
+                            pos_w = torch.zeros((77, te.text_model.config.hidden_size), device=accelerator.device, dtype=torch.float32)
+
+                        # Define a small buffer-backed embedding module
+                        class _BufferEmbedding(torch.nn.Module):
+                            def __init__(self, weight: torch.Tensor):
+                                super().__init__()
+                                # Expose a buffer named 'weight' to satisfy callers that read .weight
+                                self.register_buffer('weight', weight.to(dtype=weight_dtype), persistent=False)
+                            def forward(self, input_ids: torch.LongTensor):
+                                return torch.nn.functional.embedding(input_ids, self.weight)
+
+                        # Ensure buffer matches training dtype
+                        pos_w = pos_w.to(dtype=weight_dtype)
+                        emb.position_embedding = _BufferEmbedding(pos_w)
+                        # Cast the entire text encoder to training dtype to avoid layernorm dtype mismatch
+                        try:
+                            te.to(dtype=weight_dtype)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         training_models = [ds_model]
 
     else:

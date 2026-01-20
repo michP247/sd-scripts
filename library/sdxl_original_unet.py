@@ -46,6 +46,14 @@ TIME_EMBED_DIM = 320 * 4
 
 USE_REENTRANT = True
 
+# prefer DeepSpeed activation checkpointing when available
+def _activation_checkpoint(fn, *args, use_reentrant=USE_REENTRANT):
+    try:
+        import deepspeed
+        return deepspeed.checkpointing.checkpoint(fn, *args)
+    except Exception:
+        return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=use_reentrant)
+
 # region memory efficient attention
 
 # FlashAttentionを使うCrossAttention
@@ -345,7 +353,7 @@ class ResnetBlock2D(nn.Module):
 
                 return custom_forward
 
-            x = torch.utils.checkpoint.checkpoint(create_custom_forward(self.forward_body), x, emb, use_reentrant=USE_REENTRANT)
+            x = _activation_checkpoint(create_custom_forward(self.forward_body), x, emb, use_reentrant=USE_REENTRANT)
         else:
             x = self.forward_body(x, emb)
 
@@ -379,7 +387,7 @@ class Downsample2D(nn.Module):
 
                 return custom_forward
 
-            hidden_states = torch.utils.checkpoint.checkpoint(
+            hidden_states = _activation_checkpoint(
                 create_custom_forward(self.forward_body), hidden_states, use_reentrant=USE_REENTRANT
             )
         else:
@@ -666,7 +674,7 @@ class BasicTransformerBlock(nn.Module):
 
                 return custom_forward
 
-            output = torch.utils.checkpoint.checkpoint(
+            output = _activation_checkpoint(
                 create_custom_forward(self.forward_body), hidden_states, context, timestep, use_reentrant=USE_REENTRANT
             )
         else:
@@ -1038,7 +1046,8 @@ class SdxlUNet2DConditionModel(nn.Module):
     def is_gradient_checkpointing(self) -> bool:
         return any(hasattr(m, "gradient_checkpointing") and m.gradient_checkpointing for m in self.modules())
 
-    def enable_gradient_checkpointing(self):
+    def enable_gradient_checkpointing(self, cpu_offload: bool = False):
+        # cpu_offload is accepted for API compatibility; DeepSpeed controls actual offload via its plugin config
         self.gradient_checkpointing = True
         self.set_gradient_checkpointing(value=True)
 
@@ -1074,6 +1083,9 @@ class SdxlUNet2DConditionModel(nn.Module):
     def forward(self, x, timesteps=None, context=None, y=None, **kwargs):
         # broadcast timesteps to batch dimension
         timesteps = timesteps.expand(x.shape[0])
+
+        if y is not None and x.dtype != y.dtype:
+            x = x.to(y.dtype)
 
         hs = []
         t_emb = get_timestep_embedding(timesteps, self.model_channels, downscale_freq_shift=0)  # , repeat_only=False)

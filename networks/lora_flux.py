@@ -617,6 +617,22 @@ def create_network(
     else:
         reg_dims = None
 
+    # block-specific learning rate weights
+    block_lr_weights = kwargs.get("block_lr_weights", None)
+    if block_lr_weights is not None:
+        if isinstance(block_lr_weights, str):
+            block_lr_weights = [float(w.strip()) for w in block_lr_weights.split(",")]
+        # FLUX has 19 double blocks + 38 single blocks = 57 total blocks
+        expected_num_blocks = NUM_DOUBLE_BLOCKS + NUM_SINGLE_BLOCKS
+        if len(block_lr_weights) != expected_num_blocks:
+            raise ValueError(
+                f"block_lr_weights must have {expected_num_blocks} elements (19 double + 38 single blocks), "
+                f"but got {len(block_lr_weights)} elements"
+            )
+        logger.info(f"apply block learning rate weights for FLUX / FLUX用の階層別学習率を適用します")
+        logger.info(f"double blocks (0-18): {block_lr_weights[:NUM_DOUBLE_BLOCKS]}")
+        logger.info(f"single blocks (0-37): {block_lr_weights[NUM_DOUBLE_BLOCKS:]}")
+
     # すごく引数が多いな ( ^ω^)･･･
     network = LoRANetwork(
         text_encoders,
@@ -652,7 +668,57 @@ def create_network(
     if loraplus_lr_ratio is not None or loraplus_unet_lr_ratio is not None or loraplus_text_encoder_lr_ratio is not None:
         network.set_loraplus_lr_ratio(loraplus_lr_ratio, loraplus_unet_lr_ratio, loraplus_text_encoder_lr_ratio)
 
+    if block_lr_weights is not None:
+        network.set_block_lr_weight(block_lr_weights)
+
     return network
+
+
+def get_block_index(lora_name: str) -> int:
+    """
+    Parse block index from FLUX LoRA module name.
+
+    FLUX has 19 double_blocks (0-18) + 38 single_blocks (0-37) = 57 total blocks.
+    Returns index in range [0, 56] for the block_lr_weights array.
+
+    Examples:
+        lora_unet_double_blocks_5_img_attn_qkv -> returns 5
+        lora_unet_single_blocks_12_linear1 -> returns 19 + 12 = 31
+
+    Args:
+        lora_name: LoRA module name like "lora_unet_double_blocks_5_img_attn_qkv"
+
+    Returns:
+        Block index in range [0, 56], or -1 if not a valid FLUX block LoRA name
+    """
+    block_idx = -1
+
+    if lora_name.startswith("lora_unet_"):
+        name = lora_name[len("lora_unet_"):]
+
+        if name.startswith("double_blocks_"):
+            # double_blocks_N_... -> index N (0-18)
+            parts = name.split("_")
+            if len(parts) >= 3:
+                try:
+                    block_num = int(parts[2])
+                    if 0 <= block_num < NUM_DOUBLE_BLOCKS:
+                        block_idx = block_num
+                except ValueError:
+                    pass
+
+        elif name.startswith("single_blocks_"):
+            # single_blocks_N_... -> index NUM_DOUBLE_BLOCKS + N (19-56)
+            parts = name.split("_")
+            if len(parts) >= 3:
+                try:
+                    block_num = int(parts[2])
+                    if 0 <= block_num < NUM_SINGLE_BLOCKS:
+                        block_idx = NUM_DOUBLE_BLOCKS + block_num
+                except ValueError:
+                    pass
+
+    return block_idx
 
 
 # Create network from weights for inference, weights are not loaded here (because can be merged)
@@ -769,6 +835,9 @@ class LoRANetwork(torch.nn.Module):
         self.loraplus_lr_ratio = None
         self.loraplus_unet_lr_ratio = None
         self.loraplus_text_encoder_lr_ratio = None
+
+        self.block_lr = False
+        self.block_lr_weight = None
 
         if modules_dim is not None:
             logger.info(f"create LoRA network from weights")
@@ -1192,6 +1261,30 @@ class LoRANetwork(torch.nn.Module):
         logger.info(f"LoRA+ UNet LR Ratio: {self.loraplus_unet_lr_ratio or self.loraplus_lr_ratio}")
         logger.info(f"LoRA+ Text Encoder LR Ratio: {self.loraplus_text_encoder_lr_ratio or self.loraplus_lr_ratio}")
 
+    def set_block_lr_weight(self, block_lr_weight: Optional[List[float]]):
+        """
+        Set per-block learning rate weights for FLUX.
+
+        Args:
+            block_lr_weight: List of 57 floats (19 double blocks + 38 single blocks)
+        """
+        self.block_lr = True
+        self.block_lr_weight = block_lr_weight
+
+    def get_lr_weight(self, block_idx: int) -> float:
+        """
+        Get the learning rate weight for a specific block index.
+
+        Args:
+            block_idx: Block index in range [0, 56]
+
+        Returns:
+            Learning rate multiplier for the block, or 1.0 if block_lr is disabled
+        """
+        if not self.block_lr or self.block_lr_weight is None:
+            return 1.0
+        return self.block_lr_weight[block_idx]
+
     def prepare_optimizer_params_with_multiple_te_lrs(self, text_encoder_lr, unet_lr, default_lr):
         # make sure text_encoder_lr as list of two elements
         # if float, use the same value for both text encoders
@@ -1317,13 +1410,47 @@ class LoRANetwork(torch.nn.Module):
                 lr_descriptions.extend(["textencoder 2 " + (" " + d if d else "") for d in descriptions])
 
         if self.unet_loras:
-            params, descriptions = assemble_params(
-                self.unet_loras,
-                unet_lr if unet_lr is not None else default_lr,
-                self.loraplus_unet_lr_ratio or self.loraplus_lr_ratio,
-            )
-            all_params.extend(params)
-            lr_descriptions.extend(["unet" + (" " + d if d else "") for d in descriptions])
+            if self.block_lr:
+                # Group LoRAs by block index for per-block learning rates
+                block_idx_to_lora = {}
+                for lora in self.unet_loras:
+                    idx = get_block_index(lora.lora_name)
+                    if idx not in block_idx_to_lora:
+                        block_idx_to_lora[idx] = []
+                    block_idx_to_lora[idx].append(lora)
+
+                # Create parameter groups for each block
+                for idx in sorted(block_idx_to_lora.keys()):
+                    block_loras = block_idx_to_lora[idx]
+                    # Calculate learning rate: base_lr * block_weight
+                    base_lr = unet_lr if unet_lr is not None else default_lr
+                    block_lr_value = base_lr * self.get_lr_weight(idx)
+
+                    params, descriptions = assemble_params(
+                        block_loras,
+                        block_lr_value,
+                        self.loraplus_unet_lr_ratio or self.loraplus_lr_ratio,
+                    )
+                    all_params.extend(params)
+
+                    # Determine block label for logging
+                    if idx >= 0 and idx < NUM_DOUBLE_BLOCKS:
+                        block_label = f"double_block_{idx}"
+                    elif idx >= NUM_DOUBLE_BLOCKS and idx < NUM_DOUBLE_BLOCKS + NUM_SINGLE_BLOCKS:
+                        block_label = f"single_block_{idx - NUM_DOUBLE_BLOCKS}"
+                    else:
+                        block_label = f"block_{idx}"
+
+                    lr_descriptions.extend([f"unet_{block_label}" + (" " + d if d else "") for d in descriptions])
+            else:
+                # Standard grouping: all UNet LoRAs together
+                params, descriptions = assemble_params(
+                    self.unet_loras,
+                    unet_lr if unet_lr is not None else default_lr,
+                    self.loraplus_unet_lr_ratio or self.loraplus_lr_ratio,
+                )
+                all_params.extend(params)
+                lr_descriptions.extend(["unet" + (" " + d if d else "") for d in descriptions])
 
         return all_params, lr_descriptions
 

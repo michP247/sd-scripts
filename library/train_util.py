@@ -1701,88 +1701,99 @@ class BaseDataset(torch.utils.data.Dataset):
 
             if image_info.text_encoder_outputs is not None:
                 # cached
+                #logger.info(f"[DEBUG] Using in-memory cached text encoder outputs")
                 text_encoder_outputs = image_info.text_encoder_outputs
             elif image_info.text_encoder_outputs_npz is not None:
                 # on disk
+                #logger.info(f"[DEBUG] Loading text encoder outputs from disk: {image_info.text_encoder_outputs_npz}")
                 text_encoder_outputs = self.text_encoder_output_caching_strategy.load_outputs_npz(
                     image_info.text_encoder_outputs_npz
                 )
+                #logger.info(f"[DEBUG] Loaded outputs type: {type(text_encoder_outputs)}, is None: {text_encoder_outputs is None}")
+                #if text_encoder_outputs is not None:
+                    #logger.info(f"[DEBUG] Loaded outputs is list with {len(text_encoder_outputs)} elements")
             else:
                 tokenization_required = True
+                #logger.info(f"[DEBUG] No cached outputs available, tokenization required")
             text_encoder_outputs_list.append(text_encoder_outputs)
 
             if tokenization_required:
                 caption = self.process_caption(subset, image_info.caption)
-                input_ids = [ids[0] for ids in self.tokenize_strategy.tokenize(caption)]  # remove batch dimension
-                # if self.XTI_layers:
-                #     caption_layer = []
-                #     for layer in self.XTI_layers:
-                #         token_strings_from = " ".join(self.token_strings)
-                #         token_strings_to = " ".join([f"{x}_{layer}" for x in self.token_strings])
-                #         caption_ = caption.replace(token_strings_from, token_strings_to)
-                #         caption_layer.append(caption_)
-                #     captions.append(caption_layer)
-                # else:
-                #     captions.append(caption)
-
-                # if not self.token_padding_disabled:  # this option might be omitted in future
-                #     # TODO get_input_ids must support SD3
-                #     if self.XTI_layers:
-                #         token_caption = self.get_input_ids(caption_layer, self.tokenizers[0])
-                #     else:
-                #         token_caption = self.get_input_ids(caption, self.tokenizers[0])
-                #     input_ids_list.append(token_caption)
-
-                #     if len(self.tokenizers) > 1:
-                #         if self.XTI_layers:
-                #             token_caption2 = self.get_input_ids(caption_layer, self.tokenizers[1])
-                #         else:
-                #             token_caption2 = self.get_input_ids(caption, self.tokenizers[1])
-                #         input_ids2_list.append(token_caption2)
+                token_dict = self.tokenize_strategy.tokenize(caption)
+                if isinstance(token_dict, dict):
+                    input_ids = {k: v[0] for k, v in token_dict.items()}  # remove batch dimension
+                else:
+                    # fallback for old list-based tokenizer
+                    input_ids = [ids[0] for ids in token_dict]  # remove batch dimension
 
             input_ids_list.append(input_ids)
             captions.append(caption)
 
         def none_or_stack_elements(tensors_list, converter):
-            # [[clip_l, clip_g, t5xxl], [clip_l, clip_g, t5xxl], ...] -> [torch.stack(clip_l), torch.stack(clip_g), torch.stack(t5xxl)]
-            if len(tensors_list) == 0 or tensors_list[0] == None or len(tensors_list[0]) == 0 or tensors_list[0][0] is None:
+            if not tensors_list or not tensors_list[0]:
                 return None
 
-            # old implementation without padding: all elements must have same length
-            # return [torch.stack([converter(x[i]) for x in tensors_list]) for i in range(len(tensors_list[0]))]
-
-            # new implementation with padding support
             result = []
             for i in range(len(tensors_list[0])):
                 tensors = [x[i] for x in tensors_list]
-                if tensors[0].ndim == 0:
-                    # scalar value: e.g. ocr mask
-                    result.append(torch.stack([converter(x[i]) for x in tensors_list]))
+                if all(t is None for t in tensors):
+                    result.append(None)
+                    continue
+                
+                valid_tensors = [t for t in tensors if t is not None]
+                if not valid_tensors:
+                    result.append(None)
                     continue
 
-                min_len = min([len(x) for x in tensors])
-                max_len = max([len(x) for x in tensors])
+                if len(valid_tensors) != len(tensors):
+                    raise ValueError(f"Unsupported mixture of None and Tensors at index {i} in batch")
 
-                if min_len == max_len:
-                    # no padding
-                    result.append(torch.stack([converter(x) for x in tensors]))
+                converted_tensors = [converter(t) for t in tensors]
+
+                if converted_tensors[0].ndim == 0:
+                    result.append(torch.stack(converted_tensors))
+                    continue
+
+                shapes = [t.shape[0] for t in converted_tensors]
+                if len(set(shapes)) == 1:
+                    result.append(torch.stack(converted_tensors))
                 else:
-                    # padding
-                    tensors = [converter(x) for x in tensors]
-                    if tensors[0].ndim == 1:
-                        # input_ids or mask
-                        result.append(torch.stack([(torch.nn.functional.pad(x, (0, max_len - x.shape[0]))) for x in tensors]))
+                    max_len = max(shapes)
+                    if converted_tensors[0].ndim == 1:
+                        padded = [torch.nn.functional.pad(t, (0, max_len - t.shape[0])) for t in converted_tensors]
+                        result.append(torch.stack(padded))
                     else:
                         # text encoder outputs
-                        result.append(torch.stack([(torch.nn.functional.pad(x, (0, 0, 0, max_len - x.shape[0]))) for x in tensors]))
+                        result.append(
+                            torch.stack([(torch.nn.functional.pad(x, (0, 0, 0, max_len - x.shape[0]))) for x in tensors])
+                        )
             return result
 
         # set example
         example = {}
         example["custom_attributes"] = custom_attributes  # may be list of empty dict
         example["loss_weights"] = torch.FloatTensor(loss_weights)
-        example["text_encoder_outputs_list"] = none_or_stack_elements(text_encoder_outputs_list, torch.FloatTensor)
-        example["input_ids_list"] = none_or_stack_elements(input_ids_list, lambda x: x)
+        example["text_encoder_outputs_list"] = none_or_stack_elements(text_encoder_outputs_list, lambda x: torch.tensor(x, dtype=torch.bfloat16))
+        if input_ids_list and input_ids_list[0] is not None and isinstance(input_ids_list[0], dict):
+            # New path for dict-based tokenizers (FLUX)
+            keys = input_ids_list[0].keys()
+            # All tensors are padded to max_length by the tokenizer, so simple stack is fine.
+            collated_dict = {k: torch.stack([d[k] for d in input_ids_list]) for k in keys}
+            example["input_ids_list"] = collated_dict
+        else:
+            # Old path for list-based tokenizers
+            example["input_ids_list"] = none_or_stack_elements(input_ids_list, lambda x: x)
+
+        # merge cached text encoder outputs and tokenized inputs if necessary
+        if (
+            example["text_encoder_outputs_list"] is not None
+            and example["input_ids_list"] is not None
+            and isinstance(example["input_ids_list"], dict)
+        ):
+            # In partial caching, txt_ids is in the cached outputs, but needs to be passed to the live encoder.
+            # The live encoder gets input_ids_list as input.
+            if example["text_encoder_outputs_list"][2] is not None:  # index 2 is txt_ids
+                example["input_ids_list"]["txt_ids"] = example["text_encoder_outputs_list"][2]
 
         # if one of alpha_masks is not None, we need to replace None with ones
         none_or_not = [x is None for x in alpha_mask_list]

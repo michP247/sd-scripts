@@ -31,6 +31,14 @@ def load_target_model(args, accelerator, model_version: str, weight_dtype):
         if pi == accelerator.state.local_process_index:
             logger.info(f"loading model for process {accelerator.state.local_process_index}/{accelerator.state.num_processes}")
 
+            # Determine if we are in DeepSpeed ZeRO-3 before building models
+            is_deepspeed_stage3 = (
+                getattr(args, "deepspeed", False)
+                and hasattr(accelerator.state, "deepspeed_plugin")
+                and accelerator.state.deepspeed_plugin is not None
+                and accelerator.state.deepspeed_plugin.zero_stage >= 2
+            )
+
             (
                 load_stable_diffusion_format,
                 text_encoder1,
@@ -47,7 +55,67 @@ def load_target_model(args, accelerator, model_version: str, weight_dtype):
                 accelerator.device if args.lowram else "cpu",
                 model_dtype,
                 args.disable_mmap_load_safetensors,
+                avoid_meta_text_encoders=is_deepspeed_stage3,
             )
+
+            # If DeepSpeed ZeRO‑3 is enabled and we loaded from a SDXL checkpoint file,
+            # rebuild a hollow UNet under ZeRO init and inject weights in chunks to minimize VRAM
+            if is_deepspeed_stage3 and os.path.isfile(args.pretrained_model_name_or_path):
+                try:
+                    import deepspeed
+                    from safetensors.torch import load_file as st_load_file
+                except Exception as e:
+                    logger.warning(f"DeepSpeed or safetensors not available for hollow UNet injection: {e}")
+                else:
+                    logger.info("DeepSpeed ZeRO detected. Creating hollow SDXL UNet and injecting weights.")
+                    ds_config = accelerator.state.deepspeed_plugin.deepspeed_config
+
+                    # Build hollow original SDXL UNet under ZeRO init
+                    with deepspeed.zero.Init(config_dict_or_path=ds_config):
+                        hollow_unet = sdxl_original_unet.SdxlUNet2DConditionModel()
+
+                    # Load checkpoint state dict on CPU and extract UNet weights
+                    ckpt_path = args.pretrained_model_name_or_path
+                    if os.path.splitext(ckpt_path)[1] == ".safetensors":
+                        if args.disable_mmap_load_safetensors:
+                            # raw load to CPU buffer
+                            with open(ckpt_path, "rb") as f:
+                                import safetensors.torch
+
+                                state_dict = safetensors.torch.load(f.read())
+                        else:
+                            state_dict = st_load_file(ckpt_path, device="cpu")
+                    else:
+                        checkpoint = torch.load(ckpt_path, map_location="cpu")
+                        state_dict = checkpoint.get("state_dict", checkpoint)
+
+                    unet_sd_prefix = "model.diffusion_model."
+                    unet_sd = {k.replace(unet_sd_prefix, ""): v for k, v in state_dict.items() if k.startswith(unet_sd_prefix)}
+                    del state_dict
+
+                    # Inject in chunks
+                    all_named_params = list(hollow_unet.named_parameters())
+                    chunk_size = 16
+                    for i in tqdm(
+                        range(0, len(all_named_params), chunk_size),
+                        smoothing=0,
+                        disable=not accelerator.is_main_process,
+                        desc="Inject UNet weights",
+                    ):
+                        chunk = all_named_params[i : i + chunk_size]
+                        with deepspeed.zero.GatheredParameters([p for _, p in chunk], modifier_rank=0):
+                            if accelerator.is_main_process:
+                                for name, param in chunk:
+                                    if name in unet_sd:
+                                        param.data.copy_(unet_sd[name].to(param.device, param.dtype))
+                                    else:
+                                        logger.debug(f"UNet param not in checkpoint: {name}")
+
+                    logger.info("UNet weight injection complete.")
+                    unet = hollow_unet
+                    # free
+                    del hollow_unet
+                    clean_memory_on_device(accelerator.device)
 
             # work on low-ram device
             if args.lowram:
@@ -63,7 +131,14 @@ def load_target_model(args, accelerator, model_version: str, weight_dtype):
 
 
 def _load_target_model(
-    name_or_path: str, vae_path: Optional[str], model_version: str, weight_dtype, device="cpu", model_dtype=None, disable_mmap=False
+    name_or_path: str,
+    vae_path: Optional[str],
+    model_version: str,
+    weight_dtype,
+    device="cpu",
+    model_dtype=None,
+    disable_mmap=False,
+    avoid_meta_text_encoders: bool = False,
 ):
     # model_dtype only work with full fp16/bf16
     name_or_path = os.readlink(name_or_path) if os.path.islink(name_or_path) else name_or_path
@@ -78,7 +153,14 @@ def _load_target_model(
             unet,
             logit_scale,
             ckpt_info,
-        ) = sdxl_model_util.load_models_from_sdxl_checkpoint(model_version, name_or_path, device, model_dtype, disable_mmap)
+        ) = sdxl_model_util.load_models_from_sdxl_checkpoint(
+            model_version,
+            name_or_path,
+            device,
+            model_dtype,
+            disable_mmap,
+            avoid_meta_text_encoders=avoid_meta_text_encoders,
+        )
     else:
         # Diffusers model is loaded to CPU
         from diffusers import StableDiffusionXLPipeline

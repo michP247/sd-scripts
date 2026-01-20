@@ -8,7 +8,7 @@ import torch
 from accelerate import init_empty_weights
 from safetensors import safe_open
 from safetensors.torch import load_file
-from transformers import CLIPConfig, CLIPTextModel, T5Config, T5EncoderModel
+from transformers import CLIPConfig, CLIPTextModel, T5Config, T5EncoderModel, CLIPTextConfig
 
 from library.utils import setup_logging
 
@@ -98,6 +98,7 @@ def load_flow_model(
     device: Union[str, torch.device],
     disable_mmap: bool = False,
     model_type: str = "flux",
+    load_weights: bool = True,
 ) -> Tuple[bool, flux_models.Flux]:
     if model_type == "flux":
         is_diffusers, is_schnell, (num_double_blocks, num_single_blocks), ckpt_paths = analyze_checkpoint_state(ckpt_path)
@@ -120,27 +121,31 @@ def load_flow_model(
             if dtype is not None:
                 model = model.to(dtype)
 
-        # load_sft doesn't support torch.device
-        logger.info(f"Loading state dict from {ckpt_path}")
-        sd = {}
-        for ckpt_path in ckpt_paths:
-            sd.update(load_safetensors(ckpt_path, device=device, disable_mmap=disable_mmap, dtype=dtype))
+        if load_weights:
+            # load_sft doesn't support torch.device
+            logger.info(f"Loading state dict from {ckpt_path}")
+            sd = {}
+            for ckpt_path in ckpt_paths:
+                sd.update(load_safetensors(ckpt_path, device=device, disable_mmap=disable_mmap, dtype=dtype))
 
-        # convert Diffusers to BFL
-        if is_diffusers:
-            logger.info("Converting Diffusers to BFL")
-            sd = convert_diffusers_sd_to_bfl(sd, num_double_blocks, num_single_blocks)
-            logger.info("Converted Diffusers to BFL")
+            # convert Diffusers to BFL
+            if is_diffusers:
+                logger.info("Converting Diffusers to BFL")
+                sd = convert_diffusers_sd_to_bfl(sd, num_double_blocks, num_single_blocks)
+                logger.info("Converted Diffusers to BFL")
 
-        # if the key has annoying prefix, remove it
-        for key in list(sd.keys()):
-            new_key = key.replace("model.diffusion_model.", "")
-            if new_key == key:
-                break  # the model doesn't have annoying prefix
-            sd[new_key] = sd.pop(key)
+            # if the key has annoying prefix, remove it
+            for key in list(sd.keys()):
+                new_key = key.replace("model.diffusion_model.", "")
+                if new_key == key:
+                    break  # the model doesn't have annoying prefix
+                sd[new_key] = sd.pop(key)
 
-        info = model.load_state_dict(sd, strict=False, assign=True)
-        logger.info(f"Loaded Flux: {info}")
+            info = model.load_state_dict(sd, strict=False, assign=True)
+            logger.info(f"Loaded Flux: {info}")
+        else:
+            logger.info("Skipping weight loading (hollow model created)")
+
         return is_schnell, model
 
     elif model_type == "chroma":
@@ -153,19 +158,23 @@ def load_flow_model(
             if dtype is not None:
                 model = model.to(dtype)
 
-        # load_sft doesn't support torch.device
-        logger.info(f"Loading state dict from {ckpt_path}")
-        sd = load_safetensors(ckpt_path, device=str(device), disable_mmap=disable_mmap, dtype=dtype)
+        if load_weights:
+            # load_sft doesn't support torch.device
+            logger.info(f"Loading state dict from {ckpt_path}")
+            sd = load_safetensors(ckpt_path, device=str(device), disable_mmap=disable_mmap, dtype=dtype)
 
-        # if the key has annoying prefix, remove it
-        for key in list(sd.keys()):
-            new_key = key.replace("model.diffusion_model.", "")
-            if new_key == key:
-                break  # the model doesn't have annoying prefix
-            sd[new_key] = sd.pop(key)
+            # if the key has annoying prefix, remove it
+            for key in list(sd.keys()):
+                new_key = key.replace("model.diffusion_model.", "")
+                if new_key == key:
+                    break  # the model doesn't have annoying prefix
+                sd[new_key] = sd.pop(key)
 
-        info = model.load_state_dict(sd, strict=False, assign=True)
-        logger.info(f"Loaded Chroma: {info}")
+            info = model.load_state_dict(sd, strict=False, assign=True)
+            logger.info(f"Loaded Chroma: {info}")
+        else:
+            logger.info("Skipping weight loading (hollow model created)")
+
         is_schnell = False  # Chroma is not schnell
         return is_schnell, model
 
@@ -252,105 +261,74 @@ def load_clip_l(
     state_dict: Optional[dict] = None,
 ) -> CLIPTextModel:
     logger.info("Building CLIP-L")
-    CLIPL_CONFIG = {
-        "_name_or_path": "clip-vit-large-patch14/",
-        "architectures": ["CLIPModel"],
-        "initializer_factor": 1.0,
-        "logit_scale_init_value": 2.6592,
-        "model_type": "clip",
-        "projection_dim": 768,
-        # "text_config": {
-        "_name_or_path": "",
-        "add_cross_attention": False,
-        "architectures": None,
-        "attention_dropout": 0.0,
-        "bad_words_ids": None,
-        "bos_token_id": 0,
-        "chunk_size_feed_forward": 0,
-        "cross_attention_hidden_size": None,
-        "decoder_start_token_id": None,
-        "diversity_penalty": 0.0,
-        "do_sample": False,
-        "dropout": 0.0,
-        "early_stopping": False,
-        "encoder_no_repeat_ngram_size": 0,
-        "eos_token_id": 2,
-        "finetuning_task": None,
-        "forced_bos_token_id": None,
-        "forced_eos_token_id": None,
-        "hidden_act": "quick_gelu",
-        "hidden_size": 768,
-        "id2label": {"0": "LABEL_0", "1": "LABEL_1"},
-        "initializer_factor": 1.0,
-        "initializer_range": 0.02,
-        "intermediate_size": 3072,
-        "is_decoder": False,
-        "is_encoder_decoder": False,
-        "label2id": {"LABEL_0": 0, "LABEL_1": 1},
-        "layer_norm_eps": 1e-05,
-        "length_penalty": 1.0,
-        "max_length": 20,
-        "max_position_embeddings": 77,
-        "min_length": 0,
-        "model_type": "clip_text_model",
-        "no_repeat_ngram_size": 0,
-        "num_attention_heads": 12,
-        "num_beam_groups": 1,
-        "num_beams": 1,
-        "num_hidden_layers": 12,
-        "num_return_sequences": 1,
-        "output_attentions": False,
-        "output_hidden_states": False,
-        "output_scores": False,
-        "pad_token_id": 1,
-        "prefix": None,
-        "problem_type": None,
-        "projection_dim": 768,
-        "pruned_heads": {},
-        "remove_invalid_values": False,
-        "repetition_penalty": 1.0,
-        "return_dict": True,
-        "return_dict_in_generate": False,
-        "sep_token_id": None,
-        "task_specific_params": None,
-        "temperature": 1.0,
-        "tie_encoder_decoder": False,
-        "tie_word_embeddings": True,
-        "tokenizer_class": None,
-        "top_k": 50,
-        "top_p": 1.0,
-        "torch_dtype": None,
-        "torchscript": False,
-        "transformers_version": "4.16.0.dev0",
-        "use_bfloat16": False,
-        "vocab_size": 49408,
-        "hidden_act": "gelu",
-        "hidden_size": 1280,
-        "intermediate_size": 5120,
-        "num_attention_heads": 20,
-        "num_hidden_layers": 32,
-        # },
-        # "text_config_dict": {
-        "hidden_size": 768,
-        "intermediate_size": 3072,
-        "num_attention_heads": 12,
-        "num_hidden_layers": 12,
-        "projection_dim": 768,
-        # },
-        # "torch_dtype": "float32",
-        # "transformers_version": None,
-    }
-    config = CLIPConfig(**CLIPL_CONFIG)
-    with init_empty_weights():
-        clip = CLIPTextModel._from_config(config)
+    
+    # Create the text config directly using CLIPTextConfig
+    config = CLIPTextConfig(
+        model_type="clip_text_model",
+        add_cross_attention=False,
+        architectures=["CLIPTextModel"],
+        attention_dropout=0.0,
+        bos_token_id=0,
+        eos_token_id=2,
+        hidden_act="quick_gelu",
+        hidden_size=768,
+        initializer_range=0.02,
+        intermediate_size=3072,
+        layer_norm_eps=1e-05,
+        max_position_embeddings=77,
+        num_attention_heads=12,
+        num_hidden_layers=12,
+        pad_token_id=1,
+        projection_dim=768,
+        transformers_version="4.16.0.dev0",
+        vocab_size=49408,
+    )
 
     if state_dict is not None:
         sd = state_dict
     else:
         logger.info(f"Loading state dict from {ckpt_path}")
-        sd = load_safetensors(ckpt_path, device=str(device), disable_mmap=disable_mmap, dtype=dtype)
-    info = clip.load_state_dict(sd, strict=False, assign=True)
-    logger.info(f"Loaded CLIP-L: {info}")
+        sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype)
+
+    deepspeed_is_available = False
+    try:
+        import deepspeed
+        if hasattr(deepspeed, "zero") and hasattr(deepspeed.zero, "Init"):
+            deepspeed_is_available = True
+    except ImportError:
+        pass
+
+    # If mpi4py is missing, skip DeepSpeed zero.Init even if deepspeed is importable
+    def _can_use_zero_init():
+        try:
+            import mpi4py  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    use_zero_init = deepspeed_is_available and _can_use_zero_init()
+
+    if use_zero_init:
+        # Temporarily disable deepspeed hooks to initialize on CPU
+        from deepspeed.zero import Init as ZeroInit
+        with ZeroInit(enabled=False):
+            clip = CLIPTextModel(config)
+            clip.load_state_dict(sd, strict=False)
+            clip.text_model.embeddings.position_embedding.num_embeddings = 77
+            clip.config.max_position_embeddings = 77
+            clip.text_model.config.max_position_embeddings = 77
+    else:
+        # Initialize model with config first
+        clip = CLIPTextModel(config)
+        # Then load the state dict
+        clip.load_state_dict(sd, strict=False)
+        
+        # Also set for non-DeepSpeed case for consistency
+        clip.text_model.embeddings.position_embedding.num_embeddings = 77
+        clip.config.max_position_embeddings = 77
+        clip.text_model.config.max_position_embeddings = 77
+
+    logger.info(f"Loaded CLIP-L with max_position_embeddings={clip.config.max_position_embeddings}")
     return clip
 
 
@@ -396,16 +374,29 @@ def load_t5xxl(
 """
     config = json.loads(T5_CONFIG_JSON)
     config = T5Config(**config)
-    with init_empty_weights():
-        t5xxl = T5EncoderModel._from_config(config)
 
     if state_dict is not None:
         sd = state_dict
     else:
         logger.info(f"Loading state dict from {ckpt_path}")
-        sd = load_safetensors(ckpt_path, device=str(device), disable_mmap=disable_mmap, dtype=dtype)
-    info = t5xxl.load_state_dict(sd, strict=False, assign=True)
-    logger.info(f"Loaded T5xxl: {info}")
+        sd = load_safetensors(ckpt_path, device="cpu", disable_mmap=disable_mmap, dtype=dtype)
+
+    deepspeed_is_available = False
+    try:
+        import deepspeed
+        if hasattr(deepspeed, "zero") and hasattr(deepspeed.zero, "Init"):
+            deepspeed_is_available = True
+    except ImportError:
+        pass
+
+    if deepspeed_is_available:
+        # Temporarily disable deepspeed hooks to initialize on CPU
+        with deepspeed.zero.Init(enabled=False):
+            t5xxl = T5EncoderModel.from_pretrained(pretrained_model_name_or_path=None, config=config, state_dict=sd)
+    else:
+        t5xxl = T5EncoderModel.from_pretrained(pretrained_model_name_or_path=None, config=config, state_dict=sd)
+
+    logger.info(f"Loaded T5xxl")
     return t5xxl
 
 
