@@ -461,5 +461,24 @@ def verify_sdxl_training_args(args: argparse.Namespace, support_text_encoder_cac
 
 def sample_images(*args, **kwargs):
     from library.sdxl_lpw_stable_diffusion import SdxlStableDiffusionLongPromptWeightingPipeline
-
-    return train_util.sample_images_common(SdxlStableDiffusionLongPromptWeightingPipeline, *args, **kwargs)
+    
+    # Check if deepspeed is being used
+    accelerator = kwargs.get('accelerator') or (args[0] if len(args) > 0 else None)
+    
+    is_deepspeed_zero3 = (
+        accelerator is not None and
+        hasattr(accelerator, 'state') and 
+        hasattr(accelerator.state, 'deepspeed_plugin') and 
+        accelerator.state.deepspeed_plugin is not None and
+        getattr(accelerator.state.deepspeed_plugin, 'zero_stage', 0) == 3
+    )
+    
+    if is_deepspeed_zero3:
+        from library.sample_images_deepspeed import sample_images_with_deepspeed
+        return sample_images_with_deepspeed(
+            SdxlStableDiffusionLongPromptWeightingPipeline, *args, **kwargs
+        )
+    else:
+        return train_util.sample_images_common(
+            SdxlStableDiffusionLongPromptWeightingPipeline, *args, **kwargs
+        )
