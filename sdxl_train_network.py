@@ -574,6 +574,15 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
 
         accelerator.print(f' "block_lr_weight={",".join(final_weights_list)}"')
         
+        # Specific format for SDXL down/mid/up weights
+        down_weights = final_weights_list[0:9]
+        mid_weight = final_weights_list[9]
+        up_weights = final_weights_list[10:19]
+        mid_weights_repeated = [mid_weight] * 3
+        
+        accelerator.print("\nOr use this format for --network_args:")
+        accelerator.print(f'--network_args "down_lr_weight={",".join(down_weights)}" "mid_lr_weight={",".join(mid_weights_repeated)}" "up_lr_weight={",".join(up_weights)}"')
+        
         accelerator.print(f"\nTotal blocks: {len(final_weights_list)} (9 inputs + 1 middle + 9 outputs)")
         accelerator.print("\n" + "="*60 + "\n")
 

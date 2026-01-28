@@ -474,7 +474,7 @@ def sample_images(*args, **kwargs):
     )
     
     if is_deepspeed_zero3:
-        from library.sample_images_deepspeed import sample_images_with_deepspeed
+        from library.sample_deepspeed_v2 import sample_images_with_deepspeed
         return sample_images_with_deepspeed(
             SdxlStableDiffusionLongPromptWeightingPipeline, *args, **kwargs
         )

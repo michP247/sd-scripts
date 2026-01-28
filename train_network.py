@@ -53,6 +53,97 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+""" def enable_deepcompile(accelerator, args, training_model, logger):
+    if not (args.deepspeed and getattr(args, 'deepcompile', False)):
+        return False
+    
+    # Check PyTorch version
+    torch_version = tuple(map(int, torch.__version__.split('.')[:2]))
+    if torch_version < (2, 1):
+        logger.warning(f"DeepCompile requires PyTorch >= 2.1, found {torch.__version__}")
+        return False
+    
+    # Try to get DeepSpeed engine - multiple methods
+    engine = None
+    
+    # Method 1: The training_model itself might be the DeepSpeed engine wrapper
+    if hasattr(training_model, 'module') and hasattr(training_model, 'optimizer'):
+        # This is likely a DeepSpeedEngine
+        engine = training_model
+        logger.info("Found DeepSpeed engine directly from training_model")
+    
+    # Method 2: Check if it's wrapped by accelerate
+    if engine is None:
+        unwrapped = accelerator.unwrap_model(training_model)
+        # The unwrapped model's parent might be the engine
+        if hasattr(training_model, '_deepspeed_engine'):
+            engine = training_model._deepspeed_engine
+            logger.info("Found DeepSpeed engine from _deepspeed_engine attribute")
+    
+    # Method 3: Check accelerator's internal state
+    if engine is None and hasattr(accelerator, 'state'):
+        if hasattr(accelerator.state, 'deepspeed_plugin'):
+            # Try to get from the prepared models list
+            for model in getattr(accelerator, '_models', []):
+                if hasattr(model, 'optimizer') and hasattr(model, 'module'):
+                    engine = model
+                    logger.info("Found DeepSpeed engine from accelerator._models")
+                    break
+    
+    # Method 4: The training_model after prepare IS the engine for DeepSpeed
+    # When using accelerator.prepare() with DeepSpeed, the returned model IS the engine
+    if engine is None:
+        # Check if training_model has DeepSpeed engine attributes
+        if hasattr(training_model, 'backward') and hasattr(training_model, 'step'):
+            engine = training_model
+            logger.info("Found DeepSpeed engine: training_model has engine methods")
+    
+    # Method 5: Try importing deepspeed and checking the type
+    if engine is None:
+        try:
+            import deepspeed
+            if isinstance(training_model, deepspeed.DeepSpeedEngine):
+                engine = training_model
+                logger.info("Found DeepSpeed engine via isinstance check")
+        except ImportError:
+            pass
+    
+    if engine is None:
+        logger.warning("Could not find DeepSpeed engine for DeepCompile")
+        logger.warning(f"training_model type: {type(training_model)}")
+        logger.warning(f"training_model attributes: {[a for a in dir(training_model) if not a.startswith('_')][:20]}")
+        return False
+    
+    if not hasattr(engine, 'compile'):
+        logger.warning(f"DeepSpeed engine ({type(engine)}) does not have compile method - upgrade DeepSpeed")
+        return False
+    
+    try:
+        backend = getattr(args, 'deepcompile_backend', 'inductor')
+        logger.info(f"Calling engine.compile(backend={backend})")
+        engine.compile(
+            backend=backend,
+            compile_kwargs={
+                "mode": "reduce-overhead",
+            },
+        )
+        logger.info("DeepCompile enabled successfully!")
+        
+        # Verify it worked
+        if hasattr(engine, 'is_compiled') and engine.is_compiled:
+            logger.info("✓ Confirmed: Model is compiled")
+        if hasattr(engine, 'is_deepcompile_active'):
+            if engine.is_deepcompile_active():
+                logger.info("✓ Confirmed: DeepCompile is active")
+            else:
+                logger.warning("DeepCompile may not be fully active")
+        
+        return True
+    except Exception as e:
+        logger.error(f"DeepCompile failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False """
 
 class NetworkTrainer:
     def __init__(self):
@@ -495,7 +586,7 @@ class NetworkTrainer:
 
     def cast_unet(self, args):
         return True  # default for other than HunyuanImage
-
+    
     def train(self, args):
         session_id = random.randint(0, 2**32)
         training_started_at = time.time()
@@ -701,6 +792,41 @@ class NetworkTrainer:
         train_unet = not args.network_train_text_encoder_only
         train_text_encoder = self.is_train_text_encoder(args)
         network.apply_to(text_encoder, unet, train_text_encoder, train_unet)
+
+        # === Compile the LoRA network ===
+        if getattr(args, 'compile_network', False):
+            torch_version = tuple(map(int, torch.__version__.split('.')[:2]))
+            if torch_version >= (2, 0):
+                compile_mode = getattr(args, 'compile_mode', 'reduce-overhead')
+                accelerator.print(f"Compiling LoRA network with torch.compile(mode='{compile_mode}')...")
+                
+                try:
+                    # Compile the network's forward methods
+                    # We need to compile the individual LoRA modules, not the wrapper
+                    compiled_count = 0
+                    for name, module in network.named_modules():
+                        # Compile LoRA layers (they have 'lora_down' and 'lora_up')
+                        if hasattr(module, 'lora_down') and hasattr(module, 'lora_up'):
+                            if hasattr(module, 'forward'):
+                                original_forward = module.forward
+                                module.forward = torch.compile(
+                                    original_forward,
+                                    mode=compile_mode,
+                                    fullgraph=False,
+                                    dynamic=True,
+                                )
+                                compiled_count += 1
+                    
+                    accelerator.print(f"Compiled {compiled_count} LoRA modules")
+                    
+                except Exception as e:
+                    accelerator.print(f"Warning: Failed to compile network: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                accelerator.print(f"torch.compile requires PyTorch >= 2.0, found {torch.__version__}")
+        
+        # === END OF COMPILE BLOCK ===
 
         #self.post_process_network(args, accelerator, network, text_encoders, unet)
 
@@ -1451,6 +1577,28 @@ class NetworkTrainer:
             # log empty object to commit the sample images to wandb
             accelerator.log({}, step=0)
 
+        """ if args.deepcompile:
+            accelerator.print("Enabling DeepCompile for DeepSpeed engine...")
+            result = enable_deepcompile(accelerator, args, training_model, logger)
+            
+            # Add diagnostics
+            if result:
+                engine = training_model
+                logger.info(f"[DeepCompile Diagnostics]")
+                logger.info(f"  - is_compiled: {getattr(engine, 'is_compiled', 'N/A')}")
+                logger.info(f"  - is_deepcompile_active: {engine.is_deepcompile_active() if hasattr(engine, 'is_deepcompile_active') else 'N/A'}")
+                logger.info(f"  - is_deepcompile_enabled: {engine.is_deepcompile_enabled() if hasattr(engine, 'is_deepcompile_enabled') else 'N/A'}")
+                
+                # Check if module is actually compiled
+                if hasattr(engine, 'module'):
+                    mod = engine.module
+                    logger.info(f"  - module type: {type(mod)}")
+                    logger.info(f"  - module._compiled: {getattr(mod, '_compiled', 'not set')}")
+                    
+                    # Check for dynamo compilation
+                    import torch._dynamo as dynamo
+                    logger.info(f"  - dynamo compiled: {dynamo.is_compiling()}") """
+
         # training loop
         if initial_step > 0:  # only if skip_until_initial_step is specified
             for skip_epoch in range(epoch_to_start):  # skip epochs
@@ -2027,6 +2175,7 @@ def setup_parser() -> argparse.ArgumentParser:
         default=None,
         help="Max number of validation dataset items processed. By default, validation will run the entire validation dataset / 処理される検証データセット項目の最大数。デフォルトでは、検証は検証データセット全体を実行します",
     )
+    parser.add_argument("--compile_unet", action="store_true", help="Compile the UNet with torch.compile")
     return parser
 
 

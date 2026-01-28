@@ -6,7 +6,7 @@ batch_size = 1
 
 [[datasets]]
 resolution = [1024, 1024]
-image_directory = "/home/en1u2/AI-Stuff/References/HSdata"
+image_directory = "/home/en1u2/AI-Stuff/References/latest"
 
 #  [[datasets.subsets]]
 #  image_dir = "/home/en1u2/AI-Stuff/kohya_ss/outputs/reg/woman"

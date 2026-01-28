@@ -92,6 +92,42 @@ def add_deepspeed_arguments(parser: argparse.ArgumentParser):
         default=1,
         help="Interval (in steps) for updating accumulated gradients. Default: 1 (every step)",
     )
+    # DeepCompile Arguments
+    parser.add_argument(
+        "--deepcompile",
+        action="store_true",
+        help="Enable DeepCompile torch.compile optimization for distributed training.",
+    )
+    parser.add_argument(
+        "--deepcompile_backend",
+        type=str,
+        default="inductor",
+        choices=["inductor", "eager"],
+        help="Backend for DeepCompile. 'inductor' for performance, 'eager' for debugging.",
+    )
+    parser.add_argument(
+        "--free_activation",
+        action="store_true",
+        help="Eagerly free large activations to save memory.",
+    )
+    parser.add_argument(
+        "--offload_activation",
+        action="store_true",
+        help="Offload activations to CPU during training.",
+    )
+        # Add after other arguments
+    parser.add_argument(
+        "--compile_network",
+        action="store_true",
+        help="Compile the LoRA/network module with torch.compile for faster training.",
+    )
+    parser.add_argument(
+        "--compile_mode",
+        type=str,
+        default="reduce-overhead",
+        choices=["default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"],
+        help="torch.compile mode. 'reduce-overhead' is good for training, 'max-autotune' for max performance but slower compile.",
+    )
 
 def prepare_deepspeed_plugin(args: argparse.Namespace):
     if not args.deepspeed:
@@ -118,35 +154,13 @@ def prepare_deepspeed_plugin(args: argparse.Namespace):
         zero3_save_16bit_model=args.zero3_save_16bit_model,
     )
 
-    # Check ZenFlow requirements
-    if hasattr(args, 'zenflow') and args.zenflow:
-        # Check PyTorch version
-        import torch
-        pytorch_version = tuple(map(int, torch.__version__.split('.')[:2]))
-        if pytorch_version < (2, 1):
-            logger.error(
-                f"ZenFlow requires PyTorch >= 2.1, but found PyTorch {torch.__version__}. "
-                "Please upgrade PyTorch or disable ZenFlow."
-            )
-            exit(1)
-        
-        # Check CPU offload requirement
-        if args.zero_stage >= 2 and args.offload_optimizer_device != "cpu":
-            logger.error(
-                "ZenFlow requires CPU offload to be enabled.  "
-                "Please set --offload_optimizer_device cpu when using --zenflow"
-            )
-            exit(1)
-        
-        logger.info(f"[DeepSpeed] ZenFlow enabled with topk_ratio={args.zenflow_topk_ratio}, overlap_step={args.zenflow_overlap_step}")
-
     # Get the config dictionary that the plugin has built
     ds_config = deepspeed_plugin.deepspeed_config
 
     # Set batch sizes
     ds_config["train_micro_batch_size_per_gpu"] = args.train_batch_size
     ds_config["train_batch_size"] = (
-        args.train_batch_size * args.gradient_accumulation_steps * int(os.environ["WORLD_SIZE"])
+        args.train_batch_size * args.gradient_accumulation_steps * int(os.environ.get("WORLD_SIZE", 1))
     )
 
     # Set mixed precision
@@ -185,29 +199,97 @@ def prepare_deepspeed_plugin(args: argparse.Namespace):
     # Add memory optimization settings for Stage 3
     if args.zero_stage == 3:
         # Optimize for low VRAM
-        ds_config.update({
-            "stage3_max_live_parameters": int(5e5),
-            "stage3_max_reuse_distance": int(5e5),
-            "stage3_prefetch_bucket_size": int(3e4),
-            "stage3_param_persistence_threshold": int(1e4),
-            "reduce_bucket_size": int(5e4),
-            "allgather_bucket_size": int(5e4),
-            "sub_group_size": int(5e7),
-            "overlap_comm": True,
-            "contiguous_gradients": True,
-            "reduce_scatter": True,
-            "allgather_partitions": True,
-            "round_robin_gradients": True,
+        ds_config["zero_optimization"].update({
+            "stage3_allgather_sequential": True,
+            # "stage3_max_live_parameters": int(5e5),
+            # "stage3_max_reuse_distance": int(5e5),
+            # "stage3_prefetch_bucket_size": int(3e4),
+            # "stage3_param_persistence_threshold": int(1e4),
+            # "reduce_bucket_size": int(5e4),
+            # "allgather_bucket_size": int(5e4),
+            # "sub_group_size": int(5e7),
+            # "overlap_comm": True,
+            # "contiguous_gradients": True,
+            # "reduce_scatter": True,
+            # "allgather_partitions": True,
+            # "round_robin_gradients": True,
         })
         logger.info("[DeepSpeed] Stage 3 memory optimization settings applied for low VRAM")
-    
-    # Add general optimization settings
-    if args.zero_stage >= 2:
-        ds_config.update({
-            "overlap_comm":  True,
-            "contiguous_gradients": True,
-            "reduce_scatter": True,
-        })
+
+    # === DEEPCOMPILE CONFIG ===
+    """ if hasattr(args, 'deepcompile') and args.deepcompile:
+        ds_config["compile"] = {
+            "deepcompile": True,
+            "free_activation": getattr(args, 'free_activation', False),
+            "free_activation_threshold": 10 * 1024 * 1024,  # 10MB
+            "offload_activation": getattr(args, 'offload_activation', False),
+            "offload_opt_states": False,
+            "double_buffer": True,
+            "symmetric_memory": False,
+            "debug_log": False,
+            "offload_parameters": args.offload_param_device == "cpu" if hasattr(args, 'offload_param_device') else False,
+            "sync_before_reduce": False,
+            "sync_after_reduce": False,
+        }
+        logger.info("[DeepSpeed] DeepCompile config added to ds_config") """
+
+    # === ZENFLOW CONFIG ===
+    if hasattr(args, 'zenflow') and args.zenflow:
+        ds_config["zero_allow_untested_optimizer"] = True
+        # Check PyTorch version
+        pytorch_version = tuple(map(int, torch.__version__.split('.')[:2]))
+        if pytorch_version < (2, 1):
+            logger.error(
+                f"ZenFlow requires PyTorch >= 2.1, but found PyTorch {torch.__version__}. "
+                "Please upgrade PyTorch or disable ZenFlow."
+            )
+            exit(1)
+        
+        # Check CPU offload requirement
+        if args.zero_stage >= 2 and args.offload_optimizer_device != "cpu":
+            logger.error(
+                "ZenFlow requires CPU offload to be enabled. "
+                "Please set --offload_optimizer_device cpu when using --zenflow"
+            )
+            exit(1)
+        
+        # Get ZenFlow parameters from args with defaults
+        topk_ratio = getattr(args, 'zenflow_topk_ratio', 0.1)
+        overlap_step = getattr(args, 'zenflow_overlap_step', True)
+        full_warm_up_rounds = getattr(args, 'zenflow_full_warm_up_rounds', 100)
+        select_interval = getattr(args, 'zenflow_select_interval', 1)
+        update_interval = getattr(args, 'zenflow_update_interval', 1)
+        
+        # Configure ZenFlow with concrete values (NO "auto" strings!)
+        ds_config["zero_optimization"]["zenflow"] = {
+            "topk_ratio": topk_ratio,
+            "select_strategy": "epoch",  # Options: "epoch", "step"
+            "select_interval": select_interval,
+            "update_interval": update_interval,
+            "overlap_step": overlap_step,
+            "full_warm_up_rounds": full_warm_up_rounds,
+        }
+        
+        logger.info(f"[DeepSpeed] ZenFlow enabled:")
+        logger.info(f"  - topk_ratio: {topk_ratio}")
+        logger.info(f"  - select_strategy: epoch")
+        logger.info(f"  - select_interval: {select_interval}")
+        logger.info(f"  - update_interval: {update_interval}")
+        logger.info(f"  - overlap_step: {overlap_step}")
+        logger.info(f"  - full_warm_up_rounds: {full_warm_up_rounds}")
+
+    # === FIX FOR BFLOAT16 COMMUNICATION ===
+    # Ensure bf16 is properly configured for gradient communication
+    if args.mixed_precision == "bf16":
+        if "bf16" not in ds_config:
+            ds_config["bf16"] = {}
+        ds_config["bf16"]["enabled"] = True
+        
+        # Also set communication data type explicitly
+        ds_config["communication_data_type"] = "bf16"
+        
+        logger.info("[DeepSpeed] BF16 communication enabled")
+
 
     # Configure AIO if any NVMe offloading is used
     is_optimizer_nvme_offload = args.zero_stage >= 2 and args.offload_optimizer_device == "nvme"
