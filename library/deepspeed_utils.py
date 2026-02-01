@@ -188,11 +188,13 @@ def prepare_deepspeed_plugin(args: argparse.Namespace):
             if args.offload_param_device == "nvme":
                 ds_config["zero_optimization"]["offload_param"]["nvme_path"] = args.offload_param_nvme_path
                 # Buffer size must be >= largest param tensor (SDXL has ~63M element params)
-                # buffer_count must be >= params swapped simultaneously (needs ~10-12)
+                # buffer_count must be >= params swapped simultaneously during backward
+                # Full fine-tuning needs more buffers than LoRA due to gradient checkpointing
                 # Total GPU memory for staging: buffer_size * 2 bytes * buffer_count
-                # 70M * 2 * 12 = ~1.68GB GPU memory for NVMe param staging
+                # 70M * 2 * 16 = ~2.24GB GPU memory for NVMe param staging
                 ds_config["zero_optimization"]["offload_param"]["buffer_size"] = 70_000_000
-                ds_config["zero_optimization"]["offload_param"]["buffer_count"] = 12
+                ds_config["zero_optimization"]["offload_param"]["buffer_count"] = 16
+                ds_config["zero_optimization"]["offload_param"]["max_in_cpu"] = 5e9  # 5GB in CPU staging
         #ds_config["zero_optimization"]["stage3_max_live_parameters"] = 1e8
         #ds_config["zero_optimization"]["stage3_max_reuse_distance"] = 1e8
         ds_config["log_trace_cache_warnings"] = True
@@ -206,6 +208,9 @@ def prepare_deepspeed_plugin(args: argparse.Namespace):
             ds_config["zero_optimization"]["offload_optimizer"]["pin_memory"] = True
             if args.offload_optimizer_device == "nvme":
                 ds_config["zero_optimization"]["offload_optimizer"]["nvme_path"] = args.offload_optimizer_nvme_path
+                # NVMe optimizer offload also needs buffer configuration
+                ds_config["zero_optimization"]["offload_optimizer"]["buffer_count"] = 8
+                ds_config["zero_optimization"]["offload_optimizer"]["fast_init"] = False
 
     # Add memory optimization settings for Stage 3
     if args.optimize_zero == 1 and args.zero_stage == 3:
@@ -308,8 +313,8 @@ def prepare_deepspeed_plugin(args: argparse.Namespace):
 
     if is_optimizer_nvme_offload or is_param_nvme_offload:
         ds_config["aio"] = {
-            "single_submit": False, "overlap_events": True, "num_threads": 8,
-            "queue_depth": 32, "block_size": 1048576, "use_gds": True
+            "single_submit": False, "overlap_events": True, "num_threads": 2,
+            "queue_depth": 128, "block_size": 8388608, "use_gds": True
         }
         logger.info("[DeepSpeed] NVMe offloading configured.")
 
